@@ -1219,6 +1219,16 @@ void evdev_joystick_handler::apply_input_events(const std::shared_ptr<Pad>& pad)
 	pad->m_sticks[1].m_value = 255 - ly;
 	pad->m_sticks[2].m_value = rx;
 	pad->m_sticks[3].m_value = 255 - ry;
+/*
+	// apply deadzone (is the configured deadzone accessible here?)
+	if (abs(lx - 127) < 30)
+		lx = 127.5f;
+	if (abs(ly - 127) < 30)
+		ly = 127.5f;
+
+	pad->m_sensors[0].m_value = Clamp0To1023(512 + (lx - 127.5f));
+	pad->m_sensors[1].m_value = Clamp0To1023(399 + (ly - 127.5f) * 2); 
+	*/
 }
 
 void evdev_joystick_handler::apply_pad_data(const pad_ensemble& binding)

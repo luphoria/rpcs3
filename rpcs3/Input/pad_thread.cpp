@@ -536,6 +536,20 @@ void pad_thread::operator()()
 			m_track_start_press_begin_timestamp = 0;
 		}
 
+		// Bind gyro X,Y to left joystick
+		/* TODO: 
+			- make toggleable and accessible within UI
+			- do "real math" to calculate the axis values (123/90°/sec; Clamp0To1023)
+			- allow configuration for what gyro axes are configured to what stick axes
+		*/
+		for (u32 i = 0; i < connected_devices; i++)
+		{
+			const auto& pad = m_pads[0];
+
+			pad->m_sensors[0].m_value = (512 + (pad->m_sticks[0].m_value - 127.5f));
+			pad->m_sensors[1].m_value = (399 + (pad->m_sticks[1].m_value - 127.5f) * 2);
+		}
+
 		thread_ctrl::wait_for(pad_sleep);
 	}
 
