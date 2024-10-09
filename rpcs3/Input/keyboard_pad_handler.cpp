@@ -2,6 +2,7 @@
 #include "pad_thread.h"
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/KeyboardHandler.h"
+#include "Emu/Io/interception.h"
 #include "Input/product_info.h"
 #include "rpcs3qt/gs_frame.h"
 
@@ -59,6 +60,7 @@ void keyboard_pad_handler::init_config(cfg_pad* cfg)
 	cfg->l3.def       = GetKeyName(Qt::Key_F);
 
 	cfg->pressure_intensity_button.def = GetKeyName(Qt::NoButton);
+	cfg->analog_limiter_button.def = GetKeyName(Qt::NoButton);
 
 	cfg->lstick_anti_deadzone.def = 0;
 	cfg->rstick_anti_deadzone.def = 0;
@@ -66,8 +68,8 @@ void keyboard_pad_handler::init_config(cfg_pad* cfg)
 	cfg->rstickdeadzone.def       = 0;
 	cfg->ltriggerthreshold.def    = 0;
 	cfg->rtriggerthreshold.def    = 0;
-	cfg->lpadsquircling.def       = 0;
-	cfg->rpadsquircling.def       = 0;
+	cfg->lpadsquircling.def       = 8000;
+	cfg->rpadsquircling.def       = 8000;
 
 	// apply defaults
 	cfg->from_default();
@@ -122,7 +124,7 @@ void keyboard_pad_handler::Key(const u32 code, bool pressed, u16 value)
 			}
 		}
 
-		const bool adjust_pressure = pad.get_pressure_intensity_button_active(m_pressure_intensity_toggle_mode);
+		const bool adjust_pressure = pad.get_pressure_intensity_button_active(m_pressure_intensity_toggle_mode, pad.m_player_id);
 		const bool adjust_pressure_changed = pad.m_adjust_pressure_last != adjust_pressure;
 
 		if (adjust_pressure_changed)
@@ -130,11 +132,35 @@ void keyboard_pad_handler::Key(const u32 code, bool pressed, u16 value)
 			pad.m_adjust_pressure_last = adjust_pressure;
 		}
 
+		if (pad.m_analog_limiter_button_index >= 0)
+		{
+			Button& analog_limiter_button = pad.m_buttons[pad.m_analog_limiter_button_index];
+
+			if (analog_limiter_button.m_key_codes.contains(code))
+			{
+				const u16 actual_value = register_new_button_value(analog_limiter_button.m_pressed_keys);
+
+				analog_limiter_button.m_pressed = actual_value > 0;
+				analog_limiter_button.m_value = actual_value;
+			}
+		}
+
+		const bool analog_limiter_enabled = pad.get_analog_limiter_button_active(m_analog_limiter_toggle_mode, pad.m_player_id);
+		const bool analog_limiter_changed = pad.m_analog_limiter_enabled_last != analog_limiter_enabled;
+		const u32 l_stick_multiplier = analog_limiter_enabled ? m_l_stick_multiplier : 100;
+		const u32 r_stick_multiplier = analog_limiter_enabled ? m_r_stick_multiplier : 100;
+
+		if (analog_limiter_changed)
+		{
+			pad.m_analog_limiter_enabled_last = analog_limiter_enabled;
+		}
+
 		// Handle buttons
 		for (usz i = 0; i < pad.m_buttons.size(); i++)
 		{
-			// Ignore pressure intensity button
-			if (static_cast<s32>(i) == pad.m_pressure_intensity_button_index)
+			// Ignore special buttons
+			if (static_cast<s32>(i) == pad.m_pressure_intensity_button_index ||
+				static_cast<s32>(i) == pad.m_analog_limiter_button_index)
 				continue;
 
 			Button& button = pad.m_buttons[i];
@@ -161,31 +187,31 @@ void keyboard_pad_handler::Key(const u32 code, bool pressed, u16 value)
 				}
 			}
 
-			if (update_button)
-			{
-				if (button.m_actual_value > 0)
-				{
-					// Modify pressure if necessary if the button was pressed
-					if (adjust_pressure)
-					{
-						button.m_value = pad.m_pressure_intensity;
-					}
-					else if (m_pressure_intensity_deadzone > 0)
-					{
-						button.m_value = NormalizeDirectedInput(button.m_actual_value, m_pressure_intensity_deadzone, 255);
-					}
-					else
-					{
-						button.m_value = button.m_actual_value;
-					}
+			if (!update_button)
+				continue;
 
-					button.m_pressed = button.m_value > 0;
+			if (button.m_actual_value > 0)
+			{
+				// Modify pressure if necessary if the button was pressed
+				if (adjust_pressure)
+				{
+					button.m_value = pad.m_pressure_intensity;
+				}
+				else if (m_pressure_intensity_deadzone > 0)
+				{
+					button.m_value = NormalizeDirectedInput(button.m_actual_value, m_pressure_intensity_deadzone, 255);
 				}
 				else
 				{
-					button.m_value = 0;
-					button.m_pressed = false;
+					button.m_value = button.m_actual_value;
 				}
+
+				button.m_pressed = button.m_value > 0;
+			}
+			else
+			{
+				button.m_value = 0;
+				button.m_pressed = false;
 			}
 		}
 
@@ -194,54 +220,72 @@ void keyboard_pad_handler::Key(const u32 code, bool pressed, u16 value)
 		{
 			AnalogStick& stick = pad.m_sticks[i];
 
+			const bool is_left_stick = i < 2;
+
 			const bool is_max = stick.m_key_codes_max.contains(code);
 			const bool is_min = stick.m_key_codes_min.contains(code);
 
 			if (!is_max && !is_min)
 			{
-				continue;
-			}
+				if (!analog_limiter_changed)
+					continue;
 
-			const bool is_left_stick = i < 2;
-
-			const u16 actual_value = pressed ? MultipliedInput(value, is_left_stick ? m_l_stick_multiplier : m_r_stick_multiplier) : value;
-			u16 normalized_value = std::ceil(actual_value / 2.0);
-
-			const auto register_new_stick_value = [&](std::map<u32, u16>& pressed_keys, bool is_max)
-			{
-				// Make sure we keep this stick pressed until all related keys are released.
-				if (pressed)
-				{
-					pressed_keys[code] = normalized_value;
-				}
-				else
-				{
-					pressed_keys.erase(code);
-				}
-
-				// Get the min/max value of all pressed keys for this stick
-				for (const auto& [key, val] : pressed_keys)
-				{
-					normalized_value = is_max ? std::max(normalized_value, val) : std::min(normalized_value, val);
-				}
-			};
-
-			if (is_max)
-			{
-				register_new_stick_value(stick.m_pressed_keys_max, true);
-
+				// Update already pressed sticks
+				const bool is_min_pressed = !stick.m_pressed_keys_min.empty();
 				const bool is_max_pressed = !stick.m_pressed_keys_max.empty();
 
-				m_stick_max[i] = is_max_pressed ? std::min<int>(128 + normalized_value, 255) : 128;
+				const u32 stick_multiplier = is_left_stick ? l_stick_multiplier : r_stick_multiplier;
+
+				const u16 actual_min_value = is_min_pressed ? MultipliedInput(255, stick_multiplier) : 255;
+				const u16 normalized_min_value = std::ceil(actual_min_value / 2.0);
+
+				const u16 actual_max_value = is_max_pressed ? MultipliedInput(255, stick_multiplier) : 255;
+				const u16 normalized_max_value = std::ceil(actual_max_value / 2.0);
+
+				m_stick_min[i] = is_min_pressed ? std::min<u8>(normalized_min_value, 128) : 0;
+				m_stick_max[i] = is_max_pressed ? std::min<int>(128 + normalized_max_value, 255) : 128;
 			}
-
-			if (is_min)
+			else
 			{
-				register_new_stick_value(stick.m_pressed_keys_min, false);
+				const u16 actual_value = pressed ? MultipliedInput(value, is_left_stick ? l_stick_multiplier : r_stick_multiplier) : value;
+				u16 normalized_value = std::ceil(actual_value / 2.0);
 
-				const bool is_min_pressed = !stick.m_pressed_keys_min.empty();
+				const auto register_new_stick_value = [&](std::map<u32, u16>& pressed_keys, bool is_max)
+				{
+					// Make sure we keep this stick pressed until all related keys are released.
+					if (pressed)
+					{
+						pressed_keys[code] = normalized_value;
+					}
+					else
+					{
+						pressed_keys.erase(code);
+					}
 
-				m_stick_min[i] = is_min_pressed ? std::min<u8>(normalized_value, 128) : 0;
+					// Get the min/max value of all pressed keys for this stick
+					for (const auto& [key, val] : pressed_keys)
+					{
+						normalized_value = is_max ? std::max(normalized_value, val) : std::min(normalized_value, val);
+					}
+				};
+
+				if (is_max)
+				{
+					register_new_stick_value(stick.m_pressed_keys_max, true);
+
+					const bool is_max_pressed = !stick.m_pressed_keys_max.empty();
+
+					m_stick_max[i] = is_max_pressed ? std::min<int>(128 + normalized_value, 255) : 128;
+				}
+
+				if (is_min)
+				{
+					register_new_stick_value(stick.m_pressed_keys_min, false);
+
+					const bool is_min_pressed = !stick.m_pressed_keys_min.empty();
+
+					m_stick_min[i] = is_min_pressed ? std::min<u8>(normalized_value, 128) : 0;
+				}
 			}
 
 			m_stick_val[i] = m_stick_max[i] - m_stick_min[i];
@@ -281,10 +325,28 @@ void keyboard_pad_handler::release_all_keys()
 			pad.m_sticks[i].m_value = 128;
 		}
 	}
+
+	m_keys_released = true;
 }
 
 bool keyboard_pad_handler::eventFilter(QObject* target, QEvent* ev)
 {
+	if (!ev) [[unlikely]]
+	{
+		return false;
+	}
+
+	if (input::g_active_mouse_and_keyboard != input::active_mouse_and_keyboard::pad)
+	{
+		if (!m_keys_released)
+		{
+			release_all_keys();
+		}
+		return false;
+	}
+
+	m_keys_released = false;
+
 	// !m_target is for future proofing when gsrender isn't automatically initialized on load.
 	// !m_target->isVisible() is a hack since currently a guiless application will STILL inititialize a gsrender (providing a valid target)
 	if (!m_target || !m_target->isVisible()|| target == m_target)
@@ -338,6 +400,11 @@ void keyboard_pad_handler::SetTargetWindow(QWindow* target)
 
 void keyboard_pad_handler::processKeyEvent(QKeyEvent* event, bool pressed)
 {
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
+
 	if (event->isAutoRepeat())
 	{
 		event->ignore();
@@ -351,7 +418,7 @@ void keyboard_pad_handler::processKeyEvent(QKeyEvent* event, bool pressed)
 			return;
 
 		const bool is_num_key = list.removeAll("Num") > 0;
-		const QString name = QString::fromStdString(GetKeyName(event));
+		const QString name = QString::fromStdString(GetKeyName(event, true));
 
 		// TODO: Edge case: switching numlock keeps numpad keys pressed due to now different modifier
 
@@ -368,39 +435,17 @@ void keyboard_pad_handler::processKeyEvent(QKeyEvent* event, bool pressed)
 		}
 	};
 
-	// We need to ignore keys when using rpcs3 keyboard shortcuts
-	// NOTE: needs to be updated with gs_frame::keyPressEvent
-	switch (event->key())
-	{
-	case Qt::Key_Escape:
-	case Qt::Key_F11:
-	case Qt::Key_F12:
-		break;
-	case Qt::Key_L:
-		if (event->modifiers() != Qt::AltModifier && event->modifiers() != Qt::ControlModifier)
-			handle_key();
-		break;
-	case Qt::Key_Return:
-		if (event->modifiers() != Qt::AltModifier)
-			handle_key();
-		break;
-	case Qt::Key_P:
-	case Qt::Key_S:
-	case Qt::Key_R:
-	case Qt::Key_E:
-	case Qt::Key_0:
-		if (event->modifiers() != Qt::ControlModifier)
-			handle_key();
-		break;
-	default:
-		handle_key();
-		break;
-	}
+	handle_key();
 	event->ignore();
 }
 
 void keyboard_pad_handler::keyPressEvent(QKeyEvent* event)
 {
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
+
 	if (event->modifiers() & Qt::AltModifier)
 	{
 		switch (event->key())
@@ -459,12 +504,22 @@ void keyboard_pad_handler::keyReleaseEvent(QKeyEvent* event)
 
 void keyboard_pad_handler::mousePressEvent(QMouseEvent* event)
 {
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
+
 	Key(event->button(), true);
 	event->ignore();
 }
 
 void keyboard_pad_handler::mouseReleaseEvent(QMouseEvent* event)
 {
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
+
 	Key(event->button(), false, 0);
 	event->ignore();
 }
@@ -478,7 +533,7 @@ bool keyboard_pad_handler::get_mouse_lock_state() const
 
 void keyboard_pad_handler::mouseMoveEvent(QMouseEvent* event)
 {
-	if (!m_mouse_move_used)
+	if (!m_mouse_move_used || !event)
 	{
 		event->ignore();
 		return;
@@ -616,7 +671,7 @@ void keyboard_pad_handler::mouseMoveEvent(QMouseEvent* event)
 
 void keyboard_pad_handler::mouseWheelEvent(QWheelEvent* event)
 {
-	if (!m_mouse_wheel_used)
+	if (!m_mouse_wheel_used || !event)
 	{
 		return;
 	}
@@ -742,7 +797,7 @@ QStringList keyboard_pad_handler::GetKeyNames(const QKeyEvent* keyEvent)
 	return list;
 }
 
-std::string keyboard_pad_handler::GetKeyName(const QKeyEvent* keyEvent)
+std::string keyboard_pad_handler::GetKeyName(const QKeyEvent* keyEvent, bool with_modifiers)
 {
 	// Handle special cases first
 	if (std::string name = native_scan_code_to_string(keyEvent->nativeScanCode()); !name.empty())
@@ -770,7 +825,13 @@ std::string keyboard_pad_handler::GetKeyName(const QKeyEvent* keyEvent)
 	default:
 		break;
 	}
-	return QKeySequence(keyEvent->key() | keyEvent->modifiers()).toString(QKeySequence::NativeText).toStdString();
+
+	if (with_modifiers)
+	{
+		return QKeySequence(keyEvent->key() | keyEvent->modifiers()).toString(QKeySequence::NativeText).toStdString();
+	}
+
+	return QKeySequence(keyEvent->key()).toString(QKeySequence::NativeText).toStdString();
 }
 
 std::string keyboard_pad_handler::GetKeyName(const u32& keyCode)
@@ -893,17 +954,17 @@ std::string keyboard_pad_handler::native_scan_code_to_string(int native_scan_cod
 	}
 }
 
-bool keyboard_pad_handler::bindPadToDevice(std::shared_ptr<Pad> pad, u8 player_id)
+bool keyboard_pad_handler::bindPadToDevice(std::shared_ptr<Pad> pad)
 {
-	if (!pad || player_id >= g_cfg_input.player.size())
+	if (!pad || pad->m_player_id >= g_cfg_input.player.size())
 		return false;
 
-	const cfg_player* player_config = g_cfg_input.player[player_id];
+	const cfg_player* player_config = g_cfg_input.player[pad->m_player_id];
 	if (!player_config || player_config->device.to_string() != pad::keyboard_device_name)
 		return false;
 
-	m_pad_configs[player_id].from_string(player_config->config.to_string());
-	const cfg_pad* cfg = &m_pad_configs[player_id];
+	m_pad_configs[pad->m_player_id].from_string(player_config->config.to_string());
+	const cfg_pad* cfg = &m_pad_configs[pad->m_player_id];
 	if (cfg == nullptr)
 		return false;
 
@@ -920,6 +981,7 @@ bool keyboard_pad_handler::bindPadToDevice(std::shared_ptr<Pad> pad, u8 player_i
 	m_trigger_lerp_factor = cfg->trigger_lerp_factor / 100.0f;
 	m_l_stick_multiplier = cfg->lstickmultiplier;
 	m_r_stick_multiplier = cfg->rstickmultiplier;
+	m_analog_limiter_toggle_mode = cfg->analog_limiter_toggle_mode.get();
 	m_pressure_intensity_toggle_mode = cfg->pressure_intensity_toggle_mode.get();
 	m_pressure_intensity_deadzone = cfg->pressure_intensity_deadzone.get();
 
@@ -965,8 +1027,17 @@ bool keyboard_pad_handler::bindPadToDevice(std::shared_ptr<Pad> pad, u8 player_i
 		cfg->pressure_intensity
 	);
 
-	pad->m_buttons.emplace_back(special_button_offset, find_keys(cfg->pressure_intensity_button), special_button_value::pressure_intensity);
-	pad->m_pressure_intensity_button_index = static_cast<s32>(pad->m_buttons.size()) - 1;
+	if (b_has_pressure_intensity_button)
+	{
+		pad->m_buttons.emplace_back(special_button_offset, find_keys(cfg->pressure_intensity_button), special_button_value::pressure_intensity);
+		pad->m_pressure_intensity_button_index = static_cast<s32>(pad->m_buttons.size()) - 1;
+	}
+
+	if (b_has_analog_limiter_button)
+	{
+		pad->m_buttons.emplace_back(special_button_offset, find_keys(cfg->analog_limiter_button), special_button_value::analog_limiter);
+		pad->m_analog_limiter_button_index = static_cast<s32>(pad->m_buttons.size()) - 1;
+	}
 
 	pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, find_keys(cfg->left),     CELL_PAD_CTRL_LEFT);
 	pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, find_keys(cfg->down),     CELL_PAD_CTRL_DOWN);
@@ -1179,7 +1250,34 @@ void keyboard_pad_handler::process()
 	{
 		auto& pad = m_bindings[i].pad;
 		ensure(pad);
-		pad->m_buttons = m_pads_internal[i].m_buttons;
-		pad->m_sticks = m_pads_internal[i].m_sticks;
+
+		const cfg_pad* cfg = &m_pad_configs[pad->m_player_id];
+		ensure(cfg);
+
+		const Pad& pad_internal = m_pads_internal[i];
+
+		// Normalize and apply pad squircling
+		// Copy sticks first. We don't want to modify the raw internal values
+		std::vector<AnalogStick> squircled_sticks = pad_internal.m_sticks;
+
+		// Apply squircling
+		if (cfg->lpadsquircling != 0)
+		{
+			u16& lx = squircled_sticks[0].m_value;
+			u16& ly = squircled_sticks[1].m_value;
+
+			ConvertToSquirclePoint(lx, ly, cfg->lpadsquircling);
+		}
+
+		if (cfg->rpadsquircling != 0)
+		{
+			u16& rx = squircled_sticks[2].m_value;
+			u16& ry = squircled_sticks[3].m_value;
+
+			ConvertToSquirclePoint(rx, ry, cfg->rpadsquircling);
+		}
+
+		pad->m_buttons = pad_internal.m_buttons;
+		pad->m_sticks = std::move(squircled_sticks);
 	}
 }

@@ -11,6 +11,10 @@
 #include <thread>
 #include <cfenv>
 
+#ifdef ARCH_ARM64
+#include "Emu/CPU/Backends/AArch64/AArch64Signal.h"
+#endif
+
 #ifdef _WIN32
 #include <Windows.h>
 #include <Psapi.h>
@@ -1622,7 +1626,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			error_code sending_error = not_an_error(CELL_EBUSY);
 
 			// If we fail due to being busy, wait a bit and try again.
-			for (; static_cast<u32>(sending_error) == CELL_EBUSY; thread_ctrl::wait_for(1000))
+			for (u64 sleep_until = get_system_time(); static_cast<u32>(sending_error) == CELL_EBUSY; thread_ctrl::wait_until(&sleep_until, 1000))
 			{
 				sending_error = send_event();
 
@@ -1836,10 +1840,18 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 		}
 	}
 
-	fmt::append(msg, "Instruction address: %p.\n", pExp->ContextRecord->Rip);
+#if defined(ARCH_X64)
+	const auto exec_addr = pExp->ContextRecord->Rip;
+#elif defined(ARCH_ARM64)
+	const auto exec_addr = pExp->ContextRecord->Pc;
+#else
+#error "Unimplemented exception handling for this architecture"
+#endif
+
+	fmt::append(msg, "Instruction address: %p.\n", exec_addr);
 
 	DWORD64 unwind_base;
-	if (const auto rtf = RtlLookupFunctionEntry(pExp->ContextRecord->Rip, &unwind_base, nullptr))
+	if (const auto rtf = RtlLookupFunctionEntry(exec_addr, &unwind_base, nullptr))
 	{
 		// Get function address
 		const DWORD64 func_addr = rtf->BeginAddress + unwind_base;
@@ -1856,7 +1868,7 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 		{
 			const DWORD64 base = reinterpret_cast<DWORD64>(info.lpBaseOfDll);
 
-			if (pExp->ContextRecord->Rip >= base && pExp->ContextRecord->Rip < base + info.SizeOfImage)
+			if (exec_addr >= base && exec_addr < base + info.SizeOfImage)
 			{
 				std::string module_name;
 				for (DWORD size = 15; module_name.size() != size;)
@@ -1928,17 +1940,36 @@ static void signal_handler(int /*sig*/, siginfo_t* info, void* uct) noexcept
 	const bool is_writing = err & 0x2;
 #elif defined(ARCH_ARM64)
 	const bool is_executing = uptr(info->si_addr) == uptr(RIP(context));
+
+#if defined(__linux__) || defined(__APPLE__)
+	// Current CPU state decoder is reverse-engineered from the linux kernel and may not work on other platforms.
+	const auto decoded_reason = aarch64::decode_fault_reason(context);
+	const bool is_writing = (decoded_reason == aarch64::fault_reason::data_write);
+
+	if (decoded_reason != aarch64::fault_reason::data_write &&
+		decoded_reason != aarch64::fault_reason::data_read)
+	{
+		// We don't expect other classes of exceptions during normal executions
+		sig_log.warning("Unexpected fault. Reason: %d", static_cast<int>(decoded_reason));
+	}
+
+#else
 	const u32 insn = is_executing ? 0 : *reinterpret_cast<u32*>(RIP(context));
-	const bool is_writing = (insn & 0xbfff0000) == 0x0c000000
-		|| (insn & 0xbfe00000) == 0x0c800000
-		|| (insn & 0xbfdf0000) == 0x0d000000
-		|| (insn & 0xbfc00000) == 0x0d800000
-		|| (insn & 0x3f400000) == 0x08000000
-		|| (insn & 0x3bc00000) == 0x39000000
-		|| (insn & 0x3fc00000) == 0x3d800000
-		|| (insn & 0x3bc00000) == 0x38000000
-		|| (insn & 0x3fe00000) == 0x3c800000
-		|| (insn & 0x3a400000) == 0x28000000;
+	const bool is_writing = 
+		(insn & 0xbfff0000) == 0x0c000000 ||  // STR <Wt>, [<Xn>, #<imm>] (store word with immediate offset)
+		(insn & 0xbfe00000) == 0x0c800000 ||  // STP <Wt1>, <Wt2>, [<Xn>, #<imm>] (store pair of registers with immediate offset)
+		(insn & 0xbfdf0000) == 0x0d000000 ||  // STR <Wt>, [<Xn>, <Xm>] (store word with register offset)
+		(insn & 0xbfc00000) == 0x0d800000 ||  // STP <Wt1>, <Wt2>, [<Xn>, <Xm>] (store pair of registers with register offset)
+		(insn & 0x3f400000) == 0x08000000 ||  // STR <Vd>, [<Xn>, #<imm>] (store SIMD/FP register with immediate offset)
+		(insn & 0x3bc00000) == 0x39000000 ||  // STR <Wt>, [<Xn>, #<imm>] (store word with immediate offset)
+		(insn & 0x3fc00000) == 0x3d800000 ||  // STR <Vd>, [<Xn>, <Xm>] (store SIMD/FP register with register offset)
+		(insn & 0x3bc00000) == 0x38000000 ||  // STR <Wt>, [<Xn>, <Xm>] (store word with register offset)
+		(insn & 0x3fe00000) == 0x3c800000 ||  // STUR <Vd>, [<Xn>, #<imm>] (store unprivileged register with immediate offset)
+		(insn & 0x3fe00000) == 0x3ca00000 ||  // STR <Vd>, [<Xn>, #<imm>] (store SIMD/FP register with immediate offset)
+		(insn & 0x3a400000) == 0x28000000 ||  // STP <Wt1>, <Wt2>, [<Xn>, #<imm>] (store pair of registers with immediate offset)
+		(insn & 0xbf000000) == 0xad000000 ||  // STP <Vd1>, <Vd2>, [<Xn>, #<imm>] (store SIMD/FP 128-bit register pair with immediate offset)
+		(insn & 0xbf000000) == 0x6d000000;    // STP <Dd1>, <Dd2>, [<Xn>, #<imm>] (store SIMD/FP 64-bit register pair with immediate offset)
+#endif
 
 #else
 #error "signal_handler not implemented"
@@ -2310,6 +2341,10 @@ thread_base::native_entry thread_base::make_trampoline(u64(*entry)(thread_base* 
 		c.bind(_ret);
 		c.add(x86::rsp, 0x28);
 		c.ret();
+#else
+	UNUSED(c);
+	UNUSED(args);
+	UNUSED(entry);
 #endif
 	});
 }
@@ -2412,6 +2447,34 @@ void thread_ctrl::wait_for(u64 usec, [[maybe_unused]] bool alert /* true */)
 	}
 
 	list.wait(atomic_wait_timeout{usec <= 0xffff'ffff'ffff'ffff / 1000 ? usec * 1000 : 0xffff'ffff'ffff'ffff});
+}
+
+
+void thread_ctrl::wait_until(u64* wait_time, u64 add_time, u64 min_wait, bool update_to_current_time)
+{
+	*wait_time = utils::add_saturate<u64>(*wait_time, add_time);
+
+	// TODO: Implement proper support for "waiting until" inside atomic wait engine
+	const u64 current_time = get_system_time();
+
+	if (current_time > *wait_time)
+	{
+		if (update_to_current_time)
+		{
+			*wait_time = current_time + (add_time - (current_time - *wait_time) % add_time);
+		}
+		else if (!min_wait)
+		{
+			return;
+		}
+	}
+
+	if (min_wait)
+	{
+		*wait_time = std::max<u64>(*wait_time, utils::add_saturate<u64>(current_time, min_wait));
+	}
+
+	wait_for(*wait_time - current_time);
 }
 
 void thread_ctrl::wait_for_accurate(u64 usec)

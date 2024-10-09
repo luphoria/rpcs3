@@ -20,7 +20,9 @@ public:
 		ghltar,
 		usio,
 		ds3gem,
-		guncon3
+		guncon3,
+		topshotelite,
+		topshotfearmaster,
 	};
 
 	emulated_pad_settings_dialog(pad_type type, QWidget* parent = nullptr);

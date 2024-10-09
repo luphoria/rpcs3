@@ -21,6 +21,7 @@
 #include "progress_dialog.h"
 #include "skylander_dialog.h"
 #include "infinity_dialog.h"
+#include "dimensions_dialog.h"
 #include "cheat_manager.h"
 #include "patch_manager_dialog.h"
 #include "patch_creator_dialog.h"
@@ -37,6 +38,7 @@
 #include "emulated_pad_settings_dialog.h"
 #include "basic_mouse_settings_dialog.h"
 #include "raw_mouse_settings_dialog.h"
+#include "vfs_tool_dialog.h"
 #include "welcome_dialog.h"
 
 #include <thread>
@@ -79,6 +81,11 @@
 
 #include "ui_main_window.h"
 
+#if QT_CONFIG(permissions)
+#include <QGuiApplication>
+#include <QPermissions>
+#endif
+
 LOG_CHANNEL(gui_log, "GUI");
 
 extern atomic_t<bool> g_user_asked_for_frame_capture;
@@ -98,6 +105,32 @@ extern void process_qt_events()
 		// Adding a timeout here doesn't seem to do anything in that case.
 		QApplication::processEvents();
 	}
+}
+
+extern void check_microphone_permissions()
+{
+#if QT_CONFIG(permissions)
+	Emu.BlockingCallFromMainThread([]()
+	{
+		const QMicrophonePermission permission;
+		switch (qApp->checkPermission(permission))
+		{
+		case Qt::PermissionStatus::Undetermined:
+			gui_log.notice("Requesting microphone permission");
+			qApp->requestPermission(permission, []()
+			{
+				check_microphone_permissions();
+			});
+			break;
+		case Qt::PermissionStatus::Denied:
+			gui_log.error("RPCS3 has no permissions to access microphones on this device.");
+			break;
+		case Qt::PermissionStatus::Granted:
+			gui_log.notice("Microphone permission granted");
+			break;
+		}
+	});
+#endif
 }
 
 main_window::main_window(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, std::shared_ptr<persistent_settings> persistent_settings, QWidget *parent)
@@ -245,7 +278,7 @@ bool main_window::Init([[maybe_unused]] bool with_cli_boot)
 		}
 	});
 
-#if !defined(ARCH_ARM64) && (defined(_WIN32) || defined(__linux__) || defined(__APPLE__))
+#if (!defined(ARCH_ARM64) || defined(__APPLE__)) && (defined(_WIN32) || defined(__linux__) || defined(__APPLE__))
 	if (const auto update_value = m_gui_settings->GetValue(gui::m_check_upd_start).toString(); update_value != gui::update_off)
 	{
 		const bool in_background = with_cli_boot || update_value == gui::update_bkg;
@@ -353,12 +386,6 @@ void main_window::handle_shortcut(gui::shortcuts::shortcut shortcut_key, const Q
 
 	switch (shortcut_key)
 	{
-	case gui::shortcuts::shortcut::mw_welcome_dialog:
-	{
-		welcome_dialog* welcome = new welcome_dialog(m_gui_settings, true, this);
-		welcome->open();
-		break;
-	}
 	case gui::shortcuts::shortcut::mw_toggle_fullscreen:
 	{
 		ui->toolbar_fullscreen->trigger();
@@ -988,7 +1015,7 @@ bool main_window::HandlePackageInstallation(QStringList file_paths, bool from_bo
 	pdlg.setAutoClose(false);
 	pdlg.show();
 
-	package_error error = package_error::no_error;
+	package_install_result result = {};
 
 	auto get_app_info = [](compat::package_info& package)
 	{
@@ -1029,16 +1056,16 @@ bool main_window::HandlePackageInstallation(QStringList file_paths, bool from_bo
 	std::deque<std::string> bootable_paths;
 
 	// Run PKG unpacking asynchronously
-	named_thread worker("PKG Installer", [&readers, &error, &bootable_paths]
+	named_thread worker("PKG Installer", [&readers, &result, &bootable_paths]
 	{
-		error = package_reader::extract_data(readers, bootable_paths);
-		return error == package_error::no_error;
+		result = package_reader::extract_data(readers, bootable_paths);
+		return result.error == package_install_result::error_type::no_error;
 	});
 
 	pdlg.show();
 
 	// Wait for the completion
-	for (usz i = 0, set_text = umax; i < readers.size() && error == package_error::no_error;)
+	for (usz i = 0, set_text = umax; i < readers.size() && result.error == package_install_result::error_type::no_error;)
 	{
 		std::this_thread::sleep_for(5ms);
 
@@ -1191,10 +1218,28 @@ bool main_window::HandlePackageInstallation(QStringList file_paths, bool from_bo
 
 			ensure(package);
 
-			if (error == package_error::app_version)
+			if (result.error == package_install_result::error_type::app_version)
 			{
 				gui_log.error("Cannot install %s.", package->path);
-				QMessageBox::warning(this, tr("Warning!"), tr("The following package cannot be installed on top of the current data:\n%1!").arg(package->path));
+				const bool has_expected = !result.version.expected.empty();
+				const bool has_found = !result.version.found.empty();
+				if (has_expected && has_found)
+				{
+					QMessageBox::warning(this, tr("Warning!"), tr("Package cannot be installed on top of the current data.\nUpdate is for version %1, but you have version %2.\n\nTried to install: %3")
+							.arg(QString::fromStdString(result.version.expected)).arg(QString::fromStdString(result.version.found)).arg(package->path));
+				}
+				else if (has_expected)
+				{
+					QMessageBox::warning(this, tr("Warning!"), tr("Package cannot be installed on top of the current data.\nUpdate is for version %1, but you don't have any data installed.\n\nTried to install: %2")
+							.arg(QString::fromStdString(result.version.expected)).arg(package->path));
+				}
+				else
+				{
+					// probably unreachable
+					const QString found = has_found ? tr("version %1").arg(QString::fromStdString(result.version.found)) : tr("no data installed");
+					QMessageBox::warning(this, tr("Warning!"), tr("Package cannot be installed on top of the current data.\nUpdate is for unknown version, but you have version %1.\n\nTried to install: %2")
+							.arg(QString::fromStdString(result.version.expected)).arg(found).arg(package->path));
+				}
 			}
 			else
 			{
@@ -1717,16 +1762,14 @@ void main_window::DecryptSPRXLibraries()
 void main_window::SaveWindowState() const
 {
 	// Save gui settings
-	m_gui_settings->SetValue(gui::mw_geometry, saveGeometry());
-	m_gui_settings->SetValue(gui::mw_windowState, saveState());
-	m_gui_settings->SetValue(gui::mw_mwState, m_mw->saveState());
+	m_gui_settings->SetValue(gui::mw_geometry, saveGeometry(), false);
+	m_gui_settings->SetValue(gui::mw_windowState, saveState(), false);
+	m_gui_settings->SetValue(gui::mw_mwState, m_mw->saveState(), true);
 
 	// Save column settings
 	m_game_list_frame->SaveSettings();
 	// Save splitter state
 	m_debugger_frame->SaveSettings();
-
-	m_gui_settings->sync();
 }
 
 void main_window::RepaintThumbnailIcons()
@@ -1937,10 +1980,13 @@ void main_window::OnEmuStop()
 #endif
 	}
 
+	ui->batchRemoveShaderCachesAct->setEnabled(true);
 	ui->batchRemovePPUCachesAct->setEnabled(true);
 	ui->batchRemoveSPUCachesAct->setEnabled(true);
-	ui->batchRemoveShaderCachesAct->setEnabled(true);
-	ui->removeDiskCacheAct->setEnabled(true);
+	ui->removeHDD1CachesAct->setEnabled(true);
+	ui->removeAllCachesAct->setEnabled(true);
+	ui->removeSavestatesAct->setEnabled(true);
+	ui->cleanUpGameListAct->setEnabled(true);
 
 	ui->actionManage_Users->setEnabled(true);
 	ui->confCamerasAct->setEnabled(true);
@@ -1987,10 +2033,13 @@ void main_window::OnEmuReady() const
 	ui->actionManage_Users->setEnabled(false);
 	ui->confCamerasAct->setEnabled(false);
 
+	ui->batchRemoveShaderCachesAct->setEnabled(false);
 	ui->batchRemovePPUCachesAct->setEnabled(false);
 	ui->batchRemoveSPUCachesAct->setEnabled(false);
-	ui->batchRemoveShaderCachesAct->setEnabled(false);
-	ui->removeDiskCacheAct->setEnabled(false);
+	ui->removeHDD1CachesAct->setEnabled(false);
+	ui->removeAllCachesAct->setEnabled(false);
+	ui->removeSavestatesAct->setEnabled(false);
+	ui->cleanUpGameListAct->setEnabled(false);
 }
 
 void main_window::EnableMenus(bool enabled) const
@@ -2108,7 +2157,7 @@ QAction* main_window::CreateRecentAction(const q_string_pair& entry, const uint&
 	{
 		if (m_rg_entries.contains(entry))
 		{
-			gui_log.warning("Recent Game not valid, removing from Boot Recent list: %s", sstr(entry.first));
+			gui_log.warning("Recent Game not valid, removing from Boot Recent list: %s", entry.first);
 
 			const int idx = m_rg_entries.indexOf(entry);
 			m_rg_entries.removeAt(idx);
@@ -2637,13 +2686,15 @@ void main_window::CreateConnects()
 	connect(ui->exitAct, &QAction::triggered, this, &QWidget::close);
 
 	connect(ui->batchCreateCPUCachesAct, &QAction::triggered, m_game_list_frame, [list = m_game_list_frame]() { list->BatchCreateCPUCaches(); });
-	connect(ui->batchRemovePPUCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemovePPUCaches);
-	connect(ui->batchRemoveSPUCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveSPUCaches);
-	connect(ui->batchRemoveShaderCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveShaderCaches);
 	connect(ui->batchRemoveCustomConfigurationsAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveCustomConfigurations);
 	connect(ui->batchRemoveCustomPadConfigurationsAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveCustomPadConfigurations);
-
-	connect(ui->removeDiskCacheAct, &QAction::triggered, this, &main_window::RemoveDiskCache);
+	connect(ui->batchRemoveShaderCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveShaderCaches);
+	connect(ui->batchRemovePPUCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemovePPUCaches);
+	connect(ui->batchRemoveSPUCachesAct, &QAction::triggered, m_game_list_frame, &game_list_frame::BatchRemoveSPUCaches);
+	connect(ui->removeHDD1CachesAct, &QAction::triggered, this, &main_window::RemoveHDD1Caches);
+	connect(ui->removeAllCachesAct, &QAction::triggered, this, &main_window::RemoveAllCaches);
+	connect(ui->removeSavestatesAct, &QAction::triggered, this, &main_window::RemoveSavestates);
+	connect(ui->cleanUpGameListAct, &QAction::triggered, this, &main_window::CleanUpGameList);
 
 	connect(ui->removeFirmwareCacheAct, &QAction::triggered, this, &main_window::RemoveFirmwareCache);
 	connect(ui->createFirmwareCacheAct, &QAction::triggered, this, &main_window::CreateFirmwareCache);
@@ -2711,7 +2762,11 @@ void main_window::CreateConnects()
 	connect(ui->confShortcutsAct, &QAction::triggered, [this]()
 	{
 		shortcut_dialog dlg(m_gui_settings, this);
-		connect(&dlg, &shortcut_dialog::saved, m_shortcut_handler, &shortcut_handler::update);
+		connect(&dlg, &shortcut_dialog::saved, this, [this]()
+		{
+			m_shortcut_handler->update();
+			NotifyShortcutHandlers();
+		});
 		dlg.exec();
 	});
 
@@ -2756,6 +2811,18 @@ void main_window::CreateConnects()
 	connect(ui->confGunCon3Act, &QAction::triggered, this, [this]
 	{
 		emulated_pad_settings_dialog* dlg = new emulated_pad_settings_dialog(emulated_pad_settings_dialog::pad_type::guncon3, this);
+		dlg->show();
+	});
+
+	connect(ui->confTopShotEliteAct, &QAction::triggered, this, [this]
+	{
+		emulated_pad_settings_dialog* dlg = new emulated_pad_settings_dialog(emulated_pad_settings_dialog::pad_type::topshotelite, this);
+		dlg->show();
+	});
+
+	connect(ui->confTopShotFearmasterAct, &QAction::triggered, this, [this]
+	{
+		emulated_pad_settings_dialog* dlg = new emulated_pad_settings_dialog(emulated_pad_settings_dialog::pad_type::topshotfearmaster, this);
 		dlg->show();
 	});
 
@@ -2831,6 +2898,12 @@ void main_window::CreateConnects()
 	{
 		infinity_dialog* inf_dlg = infinity_dialog::get_dlg(this);
 		inf_dlg->show();
+	});
+
+	connect(ui->actionManage_Dimensions_ToyPad, &QAction::triggered, this, [this]
+	{
+		dimensions_dialog* dim_dlg = dimensions_dialog::get_dlg(this);
+		dim_dlg->show();
 	});
 
 	connect(ui->actionManage_Cheats, &QAction::triggered, this, [this]
@@ -2986,6 +3059,12 @@ void main_window::CreateConnects()
 
 	connect(ui->toolsExtractTARAct, &QAction::triggered, this, &main_window::ExtractTar);
 
+	connect(ui->toolsVfsDialogAct, &QAction::triggered, this, [this]()
+	{
+		vfs_tool_dialog* dlg = new vfs_tool_dialog(this);
+		dlg->show();
+	});
+
 	connect(ui->showDebuggerAct, &QAction::triggered, this, [this](bool checked)
 	{
 		checked ? m_debugger_frame->show() : m_debugger_frame->hide();
@@ -3088,7 +3167,7 @@ void main_window::CreateConnects()
 
 	connect(ui->updateAct, &QAction::triggered, this, [this]()
 	{
-#if (!defined(_WIN32) && !defined(__linux__) && !defined(__APPLE__)) || defined(ARCH_ARM64)
+#if (!defined(_WIN32) && !defined(__linux__) && !defined(__APPLE__)) || (defined(ARCH_ARM64) && !defined(__APPLE__))
 		QMessageBox::warning(this, tr("Auto-updater"), tr("The auto-updater isn't available for your OS currently."));
 		return;
 #endif
@@ -3464,18 +3543,100 @@ void main_window::SetIconSizeActions(int idx) const
 		ui->setIconSizeLargeAct->setChecked(true);
 }
 
-void main_window::RemoveDiskCache()
+void main_window::RemoveHDD1Caches()
 {
-	const std::string cache_dir = rpcs3::utils::get_hdd1_dir() + "/caches";
-
-	if (fs::remove_all(cache_dir, false))
+	if (fs::remove_all(rpcs3::utils::get_hdd1_dir() + "caches", false))
 	{
-		QMessageBox::information(this, tr("Cache Cleared"), tr("Disk cache was cleared successfully"));
+		QMessageBox::information(this, tr("HDD1 Caches Removed"), tr("HDD1 caches successfully removed"));
 	}
 	else
 	{
-		QMessageBox::warning(this, tr("Error"), tr("Could not remove disk cache"));
+		QMessageBox::warning(this, tr("Error"), tr("Could not remove HDD1 caches"));
 	}
+}
+
+void main_window::RemoveAllCaches()
+{
+	if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove all caches?")) != QMessageBox::Yes)
+		return;
+
+	const std::string cache_base_dir = rpcs3::utils::get_cache_dir();
+	u64 caches_count = 0;
+	u64 caches_removed = 0;
+
+	for (const game_info& game : m_game_list_frame->GetGameInfo()) // Loop on detected games
+	{
+		if (game && qstr(game->info.category) != cat::cat_ps3_os && fs::exists(cache_base_dir + game->info.serial)) // If not OS category and cache exists
+		{
+			caches_count++;
+
+			if (fs::remove_all(cache_base_dir + game->info.serial))
+			{
+				caches_removed++;
+			}
+		}
+	}
+
+	if (caches_count == caches_removed)
+	{
+		QMessageBox::information(this, tr("Caches Removed"), tr("%0 cache(s) successfully removed").arg(caches_removed));
+	}
+	else
+	{
+		QMessageBox::warning(this, tr("Error"), tr("Could not remove %0 of %1 cache(s)").arg(caches_count - caches_removed).arg(caches_count));
+	}
+
+	RemoveHDD1Caches();
+}
+
+void main_window::RemoveSavestates()
+{
+	if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove savestates?")) != QMessageBox::Yes)
+		return;
+
+	if (fs::remove_all(fs::get_config_dir() + "savestates", false))
+	{
+		QMessageBox::information(this, tr("Savestates Removed"), tr("Savestates successfully removed"));
+	}
+	else
+	{
+		QMessageBox::warning(this, tr("Error"), tr("Could not remove savestates"));
+	}
+}
+
+void main_window::CleanUpGameList()
+{
+	if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove invalid game paths from game list?\n"
+		"Undetectable games (zombies) as well as corrupted games will be removed from the game list file (games.yml)")) != QMessageBox::Yes)
+	{
+		return;
+	}
+
+	// List of serials (title id) to remove in "games.yml" file (if any)
+	std::vector<std::string> serials_to_remove_from_yml{};
+
+	for (const auto& [serial, path] : Emu.GetGamesConfig().get_games()) // Loop on game list file
+	{
+		bool found = false;
+
+		for (const game_info& game : m_game_list_frame->GetGameInfo()) // Loop on detected games
+		{
+			// If Disc Game and its serial is found in game list file
+			if (game && qstr(game->info.category) == cat::cat_disc_game && game->info.serial == serial)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) // If serial not found, add it to the removal list
+		{
+			serials_to_remove_from_yml.push_back(serial);
+		}
+	}
+
+	// Remove the found serials (title id) in "games.yml" file (if any)
+	QMessageBox::information(this, tr("Summary"), tr("%0 game(s) removed from game list").arg(Emu.RemoveGames(serials_to_remove_from_yml)));
 }
 
 void main_window::RemoveFirmwareCache()

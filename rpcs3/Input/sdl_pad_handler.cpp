@@ -23,6 +23,12 @@ public:
 		}
 	}
 
+	static sdl_instance& get_instance()
+	{
+		static sdl_instance instance {};
+		return instance;
+	}
+
 	bool initialize()
 	{
 		// Only init SDL once. SDL uses a global state internally...
@@ -114,9 +120,6 @@ private:
 	bool m_initialized = false;
 };
 
-constexpr u32 rumble_duration_ms = 500; // Some high number to keep rumble updates at a minimum.
-constexpr u32 rumble_refresh_ms = rumble_duration_ms - 100; // We need to keep updating the rumble. Choose a refresh timeout that is unlikely to run into missed rumble updates.
-
 sdl_pad_handler::sdl_pad_handler() : PadHandlerBase(pad_handler::sdl)
 {
 	button_list =
@@ -143,6 +146,10 @@ sdl_pad_handler::sdl_pad_handler() : PadHandlerBase(pad_handler::sdl)
 		{ SDLKeyCodes::Paddle3,  "Paddle 3" },
 		{ SDLKeyCodes::Paddle4,  "Paddle 4" },
 		{ SDLKeyCodes::Touchpad, "Touchpad" },
+		{ SDLKeyCodes::Touch_L,  "Touch Left" },
+		{ SDLKeyCodes::Touch_R,  "Touch Right" },
+		{ SDLKeyCodes::Touch_U,  "Touch Up" },
+		{ SDLKeyCodes::Touch_D,  "Touch Down" },
 		{ SDLKeyCodes::LT,       "LT"       },
 		{ SDLKeyCodes::RT,       "RT"       },
 		{ SDLKeyCodes::LSXNeg,   "LS X-"    },
@@ -170,6 +177,7 @@ sdl_pad_handler::sdl_pad_handler() : PadHandlerBase(pad_handler::sdl)
 	b_has_led = true;
 	b_has_rgb = true;
 	b_has_battery = true;
+	b_has_battery_led = true;
 
 	m_trigger_threshold = trigger_max / 2;
 	m_thumb_threshold = thumb_max / 2;
@@ -223,6 +231,7 @@ void sdl_pad_handler::init_config(cfg_pad* cfg)
 	cfg->l3.def       = ::at32(button_list, SDLKeyCodes::LS);
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, SDLKeyCodes::None);
+	cfg->analog_limiter_button.def = ::at32(button_list, SDLKeyCodes::None);
 
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
@@ -253,8 +262,7 @@ bool sdl_pad_handler::Init()
 	if (m_is_init)
 		return true;
 
-	static sdl_instance s_sdl_instance {};
-	if (!s_sdl_instance.initialize())
+	if (!sdl_instance::get_instance().initialize())
 		return false;
 
 	if (g_cfg.io.load_sdl_mappings)
@@ -340,6 +348,27 @@ SDLDevice::sdl_info sdl_pad_handler::get_sdl_info(int i)
 	info.has_rumble_triggers = SDL_GameControllerHasRumbleTriggers(info.game_controller);
 	info.has_accel = SDL_GameControllerHasSensor(info.game_controller, SDL_SENSOR_ACCEL);
 	info.has_gyro = SDL_GameControllerHasSensor(info.game_controller, SDL_SENSOR_GYRO);
+
+	if (const int num_touchpads = SDL_GameControllerGetNumTouchpads(info.game_controller); num_touchpads > 0)
+	{
+		info.touchpads.resize(num_touchpads);
+
+		for (int i = 0; i < num_touchpads; i++)
+		{
+			SDLDevice::touchpad& touchpad = ::at32(info.touchpads, i);
+			touchpad.index = i;
+
+			if (const int num_fingers = SDL_GameControllerGetNumTouchpadFingers(info.game_controller, touchpad.index); num_fingers > 0)
+			{
+				touchpad.fingers.resize(num_fingers);
+
+				for (int f = 0; f < num_fingers; f++)
+				{
+					::at32(touchpad.fingers, f).index = f;
+				}
+			}
+		}
+	}
 
 	sdl_log.notice("Found game controller %d: type=%d, name='%s', path='%s', serial='%s', vid=0x%x, pid=0x%x, product_version=0x%x, firmware_version=0x%x, has_led=%d, has_rumble=%d, has_rumble_triggers=%d, has_accel=%d, has_gyro=%d",
 		i, static_cast<int>(info.type), info.name, info.path, info.serial, info.vid, info.pid, info.product_version, info.firmware_version, info.has_led, info.has_rumble, info.has_rumble_triggers, info.has_accel, info.has_gyro);
@@ -736,14 +765,14 @@ void sdl_pad_handler::get_motion_sensors(const std::string& pad_id, const motion
 	PadHandlerBase::get_motion_sensors(pad_id, callback, fail_callback, preview_values, sensors);
 }
 
-PadHandlerBase::connection sdl_pad_handler::get_next_button_press(const std::string& padId, const pad_callback& callback, const pad_fail_callback& fail_callback, bool get_blacklist, const std::vector<std::string>& buttons)
+PadHandlerBase::connection sdl_pad_handler::get_next_button_press(const std::string& padId, const pad_callback& callback, const pad_fail_callback& fail_callback, gui_call_type call_type, const std::vector<std::string>& buttons)
 {
 	if (!m_is_init)
 		return connection::disconnected;
 
 	SDL_PumpEvents();
 
-	return PadHandlerBase::get_next_button_press(padId, callback, fail_callback, get_blacklist, buttons);
+	return PadHandlerBase::get_next_button_press(padId, callback, fail_callback, call_type, buttons);
 }
 
 void sdl_pad_handler::apply_pad_data(const pad_ensemble& binding)
@@ -765,21 +794,21 @@ void sdl_pad_handler::apply_pad_data(const pad_ensemble& binding)
 		const u8 speed_large = cfg->enable_vibration_motor_large ? pad->m_vibrateMotors[idx_l].m_value : 0;
 		const u8 speed_small = cfg->enable_vibration_motor_small ? pad->m_vibrateMotors[idx_s].m_value : 0;
 
-		dev->has_new_rumble_data |= dev->large_motor != speed_large || dev->small_motor != speed_small;
+		dev->new_output_data |= dev->large_motor != speed_large || dev->small_motor != speed_small;
 
 		dev->large_motor = speed_large;
 		dev->small_motor = speed_small;
 
-		const steady_clock::time_point now = steady_clock::now();
-		const s64 elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - dev->last_vibration).count();
+		const auto now = steady_clock::now();
+		const auto elapsed = now - dev->last_output;
 
 		// XBox One Controller can't handle faster vibration updates than ~10ms. Elite is even worse. So I'll use 20ms to be on the safe side. No lag was noticable.
-		if ((dev->has_new_rumble_data && elapsed_ms > 20) || (elapsed_ms > rumble_refresh_ms))
+		if ((dev->new_output_data && elapsed > 20ms) || elapsed > min_output_interval)
 		{
 			set_rumble(dev, speed_large, speed_small);
 
-			dev->has_new_rumble_data = false;
-			dev->last_vibration = steady_clock::now();
+			dev->new_output_data = false;
+			dev->last_output = now;
 		}
 	}
 
@@ -853,6 +882,8 @@ void sdl_pad_handler::set_rumble(SDLDevice* dev, u8 speed_large, u8 speed_small)
 {
 	if (!dev || !dev->sdl.game_controller) return;
 
+	constexpr u32 rumble_duration_ms = static_cast<u32>((min_output_interval + 100ms).count()); // Some number higher than the min_output_interval.
+
 	if (dev->sdl.has_rumble)
 	{
 		if (SDL_GameControllerRumble(dev->sdl.game_controller, speed_large * 257, speed_small * 257, rumble_duration_ms) != 0)
@@ -912,6 +943,20 @@ bool sdl_pad_handler::get_is_right_stick(const std::shared_ptr<PadDevice>& /*dev
 	}
 }
 
+bool sdl_pad_handler::get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+{
+	switch (keyCode)
+	{
+	case SDLKeyCodes::Touch_L:
+	case SDLKeyCodes::Touch_R:
+	case SDLKeyCodes::Touch_U:
+	case SDLKeyCodes::Touch_D:
+		return true;
+	default:
+		return false;
+	}
+}
+
 std::unordered_map<u64, u16> sdl_pad_handler::get_button_values(const std::shared_ptr<PadDevice>& device)
 {
 	std::unordered_map<u64, u16> values;
@@ -958,6 +1003,40 @@ std::unordered_map<u64, u16> sdl_pad_handler::get_button_values(const std::share
 			break;
 		default:
 			break;
+		}
+	}
+
+	for (const SDLDevice::touchpad& touchpad : dev->sdl.touchpads)
+	{
+		for (const SDLDevice::touch_point& finger : touchpad.fingers)
+		{
+			u8 state = 0; // 1 means the finger is touching the pad
+			f32 x = 0.0f; // 0 = left, 1 = right
+			f32 y = 0.0f; // 0 = top, 1 = bottom
+			f32 pressure = 0.0f; // In the current SDL version the pressure is always 1 if the state is 1
+
+			if (SDL_GameControllerGetTouchpadFinger(dev->sdl.game_controller, touchpad.index, finger.index, &state, &x, &y, &pressure) != 0)
+			{
+				sdl_log.error("Could not get touchpad %d finger %d data of device %d! SDL Error: %s", touchpad.index, finger.index, dev->player_id, SDL_GetError());
+			}
+			else
+			{
+				sdl_log.trace("touchpad=%d, finger=%d, state=%d, x=%f, y=%f, pressure=%f", touchpad.index, finger.index, state, x, y, pressure);
+
+				if (state == 0)
+				{
+					continue;
+				}
+
+				const f32 x_scaled = ScaledInput(x, 0.0f, 1.0f, 0.0f, 255.0f);
+				const f32 y_scaled = ScaledInput(y, 0.0f, 1.0f, 0.0f, 255.0f);
+
+				values[SDLKeyCodes::Touch_L] = Clamp0To255((127.5f - x_scaled) * 2.0f);
+				values[SDLKeyCodes::Touch_R] = Clamp0To255((x_scaled - 127.5f) * 2.0f);
+
+				values[SDLKeyCodes::Touch_U] = Clamp0To255((127.5f - y_scaled) * 2.0f);
+				values[SDLKeyCodes::Touch_D] = Clamp0To255((y_scaled - 127.5f) * 2.0f);
+			}
 		}
 	}
 

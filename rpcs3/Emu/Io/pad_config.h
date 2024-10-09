@@ -71,6 +71,8 @@ struct cfg_pad final : cfg::node
 	cfg::_bool pressure_intensity_toggle_mode{ this, "Pressure Intensity Toggle Mode", false };
 	cfg::uint<0, 255> pressure_intensity_deadzone{ this, "Pressure Intensity Deadzone", 0 };
 
+	cfg::string analog_limiter_button{ this, "Analog Limiter Button", "" };
+	cfg::_bool analog_limiter_toggle_mode{ this, "Analog Limiter Toggle Mode", false };
 	cfg::uint<0, 200> lstickmultiplier{ this, "Left Stick Multiplier", 100 };
 	cfg::uint<0, 200> rstickmultiplier{ this, "Right Stick Multiplier", 100 };
 	cfg::uint<0, 1000000> lstickdeadzone{ this, "Left Stick Deadzone", 0 };
@@ -79,8 +81,8 @@ struct cfg_pad final : cfg::node
 	cfg::uint<0, 1000000> rstick_anti_deadzone{ this, "Right Stick Anti-Deadzone", 0 };
 	cfg::uint<0, 1000000> ltriggerthreshold{ this, "Left Trigger Threshold", 0 };
 	cfg::uint<0, 1000000> rtriggerthreshold{ this, "Right Trigger Threshold", 0 };
-	cfg::uint<0, 1000000> lpadsquircling{ this, "Left Pad Squircling Factor", 0 };
-	cfg::uint<0, 1000000> rpadsquircling{ this, "Right Pad Squircling Factor", 0 };
+	cfg::uint<0, 1000000> lpadsquircling{ this, "Left Pad Squircling Factor", 8000 };
+	cfg::uint<0, 1000000> rpadsquircling{ this, "Right Pad Squircling Factor", 8000 };
 
 	cfg::uint<0, 255> colorR{ this, "Color Value R", 0 };
 	cfg::uint<0, 255> colorG{ this, "Color Value G", 0 };

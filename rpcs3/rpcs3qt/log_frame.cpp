@@ -24,8 +24,6 @@ extern std::array<std::deque<std::string>, 16> g_tty_input;
 extern std::mutex g_tty_mutex;
 extern bool g_log_all_errors;
 
-constexpr auto qstr = QString::fromStdString;
-
 struct gui_listener : logs::listener
 {
 	atomic_t<logs::level> enabled{logs::level{0xff}};
@@ -273,10 +271,10 @@ void log_frame::CreateAndConnectActions()
 	m_ansi_act_tty = new QAction(tr("ANSI Code (TTY)"), this);
 	m_ansi_act_tty->setCheckable(true);
 	connect(m_ansi_act_tty, &QAction::toggled, [this](bool checked)
-		{
-			m_gui_settings->SetValue(gui::l_ansi_code, checked);
-			m_ansi_tty = checked;
-		});
+	{
+		m_gui_settings->SetValue(gui::l_ansi_code, checked);
+		m_ansi_tty = checked;
+	});
 
 	m_tty_channel_acts = new QActionGroup(this);
 	// Special Channel: All
@@ -891,7 +889,7 @@ void log_frame::UpdateUI()
 			}
 
 			// Print UTF-8 text.
-			m_log_text += escaped(qstr(packet->msg), QString{});
+			m_log_text += escaped(QString::fromStdString(packet->msg), QString{});
 
 			if (m_stack_log)
 			{

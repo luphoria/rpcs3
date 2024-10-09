@@ -53,6 +53,7 @@ ds3_pad_handler::ds3_pad_handler()
 	b_has_motion = true;
 	b_has_deadzones = true;
 	b_has_battery = true;
+	b_has_battery_led = true;
 	b_has_led = true;
 	b_has_rgb = false;
 	b_has_player_led = true;
@@ -74,7 +75,11 @@ ds3_pad_handler::~ds3_pad_handler()
 			// Disable blinking and vibration
 			controller.second->large_motor = 0;
 			controller.second->small_motor = 0;
-			send_output_report(controller.second.get());
+
+			if (send_output_report(controller.second.get()) == -1)
+			{
+				ds3_log.error("~ds3_pad_handler: send_output_report failed! error=%s", hid_error(controller.second->hidDevice));
+			}
 		}
 	}
 }
@@ -105,7 +110,10 @@ void ds3_pad_handler::SetPadData(const std::string& padId, u8 player_id, u8 larg
 	device->config->player_led_enabled.set(player_led);
 
 	// Start/Stop the engines :)
-	send_output_report(device.get());
+	if (send_output_report(device.get()) == -1)
+	{
+		ds3_log.error("SetPadData: send_output_report failed! error=%s", hid_error(device->hidDevice));
+	}
 }
 
 int ds3_pad_handler::send_output_report(ds3_device* ds3dev)
@@ -190,6 +198,7 @@ void ds3_pad_handler::init_config(cfg_pad* cfg)
 	cfg->l3.def = ::at32(button_list, DS3KeyCodes::L3);
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, DS3KeyCodes::None);
+	cfg->analog_limiter_button.def = ::at32(button_list, DS3KeyCodes::None);
 
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = 0;
@@ -412,14 +421,14 @@ void ds3_pad_handler::get_extended_info(const pad_ensemble& binding)
 	const auto& device = binding.device;
 	const auto& pad = binding.pad;
 
-	ds3_device* ds3dev = static_cast<ds3_device*>(device.get());
-	if (!ds3dev || !pad)
+	ds3_device* dev = static_cast<ds3_device*>(device.get());
+	if (!dev || !pad)
 		return;
 
-	const ds3_input_report& report = ds3dev->report;
+	const ds3_input_report& report = dev->report;
 
-	pad->m_battery_level = ds3dev->battery_level;
-	pad->m_cable_state   = ds3dev->cable_state;
+	pad->m_battery_level = dev->battery_level;
+	pad->m_cable_state   = dev->cable_state;
 
 	// For unknown reasons the sixaxis values seem to be in little endian on linux
 
@@ -501,14 +510,13 @@ PadHandlerBase::connection ds3_pad_handler::update_connection(const std::shared_
 
 	if (dev->hidDevice == nullptr)
 	{
-		hid_device* devhandle = hid_open_path(dev->path.c_str());
-		if (devhandle)
+		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
 		{
-			if (hid_set_nonblocking(devhandle, 1) == -1)
+			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
-				ds3_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", dev->path, hid_error(devhandle));
+				ds3_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", dev->path, hid_error(hid_dev));
 			}
-			dev->hidDevice = devhandle;
+			dev->hidDevice = hid_dev;
 		}
 		else
 		{
@@ -519,8 +527,7 @@ PadHandlerBase::connection ds3_pad_handler::update_connection(const std::shared_
 	if (get_data(dev) == DataStatus::ReadError)
 	{
 		// this also can mean disconnected, either way deal with it on next loop and reconnect
-		hid_close(dev->hidDevice);
-		dev->hidDevice = nullptr;
+		dev->close();
 
 		return connection::no_data;
 	}
@@ -590,11 +597,19 @@ void ds3_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	dev->large_motor = speed_large;
 	dev->small_motor = speed_small;
 
-	if (dev->new_output_data)
+	const auto now = steady_clock::now();
+	const auto elapsed = now - dev->last_output;
+
+	if (dev->new_output_data || elapsed > min_output_interval)
 	{
-		if (send_output_report(dev) >= 0)
+		if (const int res = send_output_report(dev); res >= 0)
 		{
 			dev->new_output_data = false;
+			dev->last_output = now;
+		}
+		else if (res == -1)
+		{
+			ds3_log.error("apply_pad_data: send_output_report failed! error=%s", hid_error(dev->hidDevice));
 		}
 	}
 }

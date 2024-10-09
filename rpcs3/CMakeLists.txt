@@ -27,6 +27,10 @@ if(UNIX AND NOT APPLE)
     if(X11_FOUND)
         add_definitions(-DHAVE_X11)
     endif()
+    find_package(Wayland)
+    if(WAYLAND_FOUND)
+        add_definitions(-DHAVE_WAYLAND)
+    endif()
 endif()
 
 # Qt
@@ -60,6 +64,7 @@ target_sources(rpcs3
     headless_application.cpp
     main.cpp
     main_application.cpp
+    module_verifier.cpp
     rpcs3_version.cpp
     stb_image.cpp
     stdafx.cpp
@@ -96,8 +101,7 @@ target_link_libraries(rpcs3 PRIVATE ${ADDITIONAL_LIBS})
 
 # Unix display manager
 if(X11_FOUND)
-    target_include_directories(rpcs3 PUBLIC ${X11_INCLUDE_DIR})
-    target_link_libraries(rpcs3 PRIVATE ${X11_LIBRARIES})
+    target_link_libraries(rpcs3 PRIVATE X11::X11)
 elseif(USE_VULKAN AND UNIX AND NOT WAYLAND_FOUND AND NOT APPLE)
     # Wayland has been checked in 3rdparty/CMakeLists.txt already.
     message(FATAL_ERROR "RPCS3 requires either X11 or Wayland (or both) for Vulkan.")
@@ -110,7 +114,7 @@ if(UNIX)
 endif()
 
 if(WIN32)
-    target_link_libraries(rpcs3 PRIVATE ws2_32 Iphlpapi Winmm Psapi gdi32 setupapi pdh)
+    target_link_libraries(rpcs3 PRIVATE bcrypt ws2_32 Iphlpapi Winmm Psapi gdi32 setupapi pdh)
 else()
     target_link_libraries(rpcs3 PRIVATE ${CMAKE_DL_LIBS})
 endif()
@@ -126,6 +130,7 @@ if(APPLE)
     else()
         set(QT_DEPLOY_FLAGS "")
     endif()
+    qt_finalize_target(rpcs3)
     add_custom_command(TARGET rpcs3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy
             ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns

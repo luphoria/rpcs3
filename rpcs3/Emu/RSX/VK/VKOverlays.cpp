@@ -336,6 +336,7 @@ namespace vk
 	}
 
 	ui_overlay_renderer::ui_overlay_renderer()
+		: m_texture_type(rsx::overlays::texture_sampling_mode::none)
 	{
 		vs_src =
 		#include "../Program/GLSLSnippets/OverlayRenderVS.glsl"
@@ -365,8 +366,8 @@ namespace vk
 		renderpass_config.set_color_mask(0, true, true, true, true);
 		renderpass_config.set_depth_mask(false);
 		renderpass_config.enable_blend(0,
-			VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_SRC_ALPHA,
-			VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ZERO,
+			VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_FACTOR_ONE,
 			VK_BLEND_OP_ADD, VK_BLEND_OP_ADD);
 	}
 
@@ -907,7 +908,7 @@ namespace vk
 		for (auto& img : src)
 		{
 			img->push_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-			views.push_back(img->get_view(VK_REMAP_IDENTITY, rsx::default_remap_vector));
+			views.push_back(img->get_view(rsx::default_remap_vector.with_encoding(VK_REMAP_IDENTITY)));
 		}
 
 		if (views.size() < 2)

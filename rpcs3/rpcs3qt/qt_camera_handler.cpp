@@ -6,6 +6,11 @@
 
 #include <QMediaDevices>
 
+#if QT_CONFIG(permissions)
+#include <QGuiApplication>
+#include <QPermissions>
+#endif
+
 LOG_CHANNEL(camera_log, "Camera");
 
 qt_camera_handler::qt_camera_handler() : camera_handler_base()
@@ -180,6 +185,26 @@ void qt_camera_handler::start_camera()
 		return;
 	}
 
+#if QT_CONFIG(permissions)
+	const QCameraPermission permission;
+	switch (qApp->checkPermission(permission))
+	{
+	case Qt::PermissionStatus::Undetermined:
+		camera_log.notice("Requesting camera permission");
+		qApp->requestPermission(permission, this, [this]()
+		{
+			start_camera();
+		});
+		return;
+	case Qt::PermissionStatus::Denied:
+		camera_log.error("RPCS3 has no permissions to access cameras on this device.");
+		return;
+	case Qt::PermissionStatus::Granted:
+		camera_log.notice("Camera permission granted");
+		break;
+	}
+#endif
+
 	// Start camera. We will start receiving frames now.
 	m_camera->start();
 }
@@ -298,13 +323,16 @@ void qt_camera_handler::update_camera_settings()
 	// Update camera if possible. We can only do this if it is already loaded.
 	if (m_camera && m_camera->isAvailable())
 	{
+		// Get camera id. Use camera id of Qt default if the "Default" camera is selected.
+		const std::string camera_id = (m_camera_id == g_cfg.io.camera_id.def) ? QMediaDevices::defaultVideoInput().id().toStdString() : m_camera_id;
+
 		// Load selected settings from config file
 		bool success = false;
-		cfg_camera::camera_setting cfg_setting = g_cfg_camera.get_camera_setting(m_camera_id, success);
+		cfg_camera::camera_setting cfg_setting = g_cfg_camera.get_camera_setting(camera_id, success);
 
 		if (success)
 		{
-			camera_log.notice("Found config entry for camera \"%s\"", m_camera_id);
+			camera_log.notice("Found config entry for camera \"%s\" (m_camera_id='%s')", camera_id, m_camera_id);
 
 			// List all available settings and choose the proper value if possible.
 			const double epsilon = 0.001;

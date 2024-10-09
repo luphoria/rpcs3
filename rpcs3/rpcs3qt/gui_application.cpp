@@ -166,8 +166,6 @@ bool gui_application::Init()
 		{
 			m_gui_settings->SetValue(gui::m_currentStylesheet, "Darker Style by TheMitoSan");
 		}
-
-		m_gui_settings->sync();
 	}
 
 	// Check maxfiles
@@ -311,6 +309,7 @@ void gui_application::InitializeConnects()
 		connect(m_main_window, &main_window::RequestLanguageChange, this, &gui_application::LoadLanguage);
 		connect(m_main_window, &main_window::RequestGlobalStylesheetChange, this, &gui_application::OnChangeStyleSheetRequest);
 		connect(m_main_window, &main_window::NotifyEmuSettingsChange, this, [this](){ OnEmuSettingsChange(); });
+		connect(m_main_window, &main_window::NotifyShortcutHandlers, this, &gui_application::OnShortcutChange);
 
 		connect(this, &gui_application::OnEmulatorRun, m_main_window, &main_window::OnEmuRun);
 		connect(this, &gui_application::OnEmulatorStop, m_main_window, &main_window::OnEmuStop);
@@ -819,7 +818,7 @@ void gui_application::StartPlaytime(bool start_playtime = true)
 		return;
 	}
 
-	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format));
+	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format), true);
 	m_timer_playtime.start();
 	m_timer.start(10000); // Update every 10 seconds in case the emulation crashes
 }
@@ -840,8 +839,8 @@ void gui_application::UpdatePlaytime()
 		return;
 	}
 
-	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart());
-	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format));
+	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart(), false);
+	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format), true);
 }
 
 void gui_application::StopPlaytime()
@@ -858,8 +857,8 @@ void gui_application::StopPlaytime()
 		return;
 	}
 
-	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart());
-	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format));
+	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart(), false);
+	m_persistent_settings->SetLastPlayed(serial, QDateTime::currentDateTime().toString(gui::persistent::last_played_date_format), true);
 	m_timer_playtime.invalidate();
 }
 
@@ -889,8 +888,17 @@ void gui_application::OnChangeStyleSheetRequest()
 	// Determine default style
 	if (m_default_style.isEmpty())
 	{
+#ifdef _WIN32
+		// On windows, the custom stylesheets don't seem to work properly unless we use the windowsvista style as default
+		if (QStyleFactory::keys().contains("windowsvista"))
+		{
+			m_default_style = "windowsvista";
+			gui_log.notice("Using '%s' as default style", m_default_style);
+		}
+#endif
+
 		// Use the initial style as default style
-		if (const QStyle* style = QApplication::style())
+		if (const QStyle* style = m_default_style.isEmpty() ? QApplication::style() : nullptr)
 		{
 			m_default_style = style->name();
 			gui_log.notice("Determined '%s' as default style", m_default_style);
@@ -1021,6 +1029,14 @@ void gui_application::OnChangeStyleSheetRequest()
 	if (m_main_window)
 	{
 		m_main_window->RepaintGui();
+	}
+}
+
+void gui_application::OnShortcutChange()
+{
+	if (m_game_window)
+	{
+		static_cast<gs_frame*>(m_game_window)->update_shortcuts();
 	}
 }
 

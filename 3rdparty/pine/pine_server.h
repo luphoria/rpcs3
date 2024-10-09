@@ -4,7 +4,12 @@
 
 #pragma once
 
-//#include "Utilities/Thread.h"
+// IPC uses a concept of "slot" to be able to communicate with multiple
+// emulators at the same time, each slot should be unique to each emulator to
+// allow PnP and configurable by the end user so that several runs don't
+// conflict with each others
+#define IPC_DEFAULT_SLOT 28012
+
 #include <string>
 #include "stdafx.h"
 #include <stdio.h>
@@ -195,7 +200,7 @@ namespace pine
 					if (!SafetyChecks(buf_cnt, 4, ret_cnt, 1, buf_size))
 						return error();
 					const u32 a = FromArray<u32>(&buf[buf_cnt], 0);
-					if (!Impl::template check_addr(a))
+					if (!Impl::template check_addr<1>(a))
 						return error();
 					const u8 res = Impl::read8(a);
 					ToArray(ret_buffer, res, ret_cnt);
@@ -247,7 +252,7 @@ namespace pine
 					if (!SafetyChecks(buf_cnt, 1 + 4, ret_cnt, 0, buf_size))
 						return error();
 					const u32 a = FromArray<u32>(&buf[buf_cnt], 0);
-					if (!Impl::template check_addr(a, vm::page_writable))
+					if (!Impl::template check_addr<1>(a, vm::page_writable))
 						return error();
 					Impl::write8(a, FromArray<u8>(&buf[buf_cnt], 4));
 					buf_cnt += 5;
@@ -568,7 +573,11 @@ namespace pine
 				m_socket_name += "/rpcs3.sock";
 			}
 
-			m_socket_name = fmt::format("%s.%d", m_socket_name, Impl::get_port());
+			const int slot = Impl::get_port();
+			if (slot != IPC_DEFAULT_SLOT)
+			{
+				fmt::append(m_socket_name, ".%d", slot);
+			}
 
 			struct sockaddr_un server;
 

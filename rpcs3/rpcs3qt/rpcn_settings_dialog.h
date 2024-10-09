@@ -106,7 +106,7 @@ class rpcn_friends_dialog : public QDialog
 public:
 	rpcn_friends_dialog(QWidget* parent = nullptr);
 	~rpcn_friends_dialog();
-	void callback_handler(rpcn::NotificationType ntype, std::string username, bool status);
+	void callback_handler(rpcn::NotificationType ntype, const std::string& username, bool status);
 	bool is_ok() const;
 
 private:
@@ -114,17 +114,22 @@ private:
 	void remove_list(QListWidget* list, const QString& name);
 
 private Q_SLOTS:
-	void add_update_friend(QString name, bool status);
-	void remove_friend(QString name);
-	void add_query(QString name);
+	void add_update_friend(const QString& name, bool status);
+	void remove_friend(const QString& name);
+	void add_query(const QString& name);
 
 Q_SIGNALS:
-	void signal_add_update_friend(QString name, bool status);
-	void signal_remove_friend(QString name);
-	void signal_add_query(QString name);
+	void signal_add_update_friend(const QString& name, bool status);
+	void signal_remove_friend(const QString& name);
+	void signal_add_query(const QString& name);
 
 private:
-	const QIcon m_green_icon, m_red_icon, m_yellow_icon, m_orange_icon, m_black_icon;
+	QIcon m_icon_online;
+	QIcon m_icon_offline;
+	QIcon m_icon_blocked;
+	QIcon m_icon_request_received;
+	QIcon m_icon_request_sent;
+
 	// list of friends
 	QListWidget* m_lst_friends = nullptr;
 	// list of friend requests sent by/to the current user

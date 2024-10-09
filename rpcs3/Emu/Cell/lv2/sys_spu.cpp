@@ -731,17 +731,6 @@ error_code sys_spu_thread_initialize(ppu_thread& ppu, vm::ptr<u32> thread, u32 g
 
 	if (++group->init == group->max_num)
 	{
-		if (g_cfg.core.max_spurs_threads < 6 && group->max_num > 0u + g_cfg.core.max_spurs_threads)
-		{
-			if (group->name.ends_with("CellSpursKernelGroup"))
-			{
-				// Hack: don't run more SPURS threads than specified.
-				group->max_run = g_cfg.core.max_spurs_threads;
-
-				spu_log.success("HACK: '%s' (0x%x) limited to %u threads.", group->name, group_id, +g_cfg.core.max_spurs_threads);
-			}
-		}
-
 		const auto old = group->run_state.compare_and_swap(SPU_THREAD_GROUP_STATUS_NOT_INITIALIZED, SPU_THREAD_GROUP_STATUS_INITIALIZED);
 
 		if (old == SPU_THREAD_GROUP_STATUS_DESTROYED)
@@ -1057,7 +1046,7 @@ error_code sys_spu_thread_group_start(ppu_thread& ppu, u32 id)
 	default: return CELL_ESTAT;
 	}
 
-	const u32 max_threads = group->max_run;
+	const u32 max_threads = group->max_num;
 
 	group->join_state = 0;
 	group->exit_status = 0;
@@ -1399,7 +1388,7 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 				if (prev_resv && prev_resv != resv)
 				{
 					// Batch reservation notifications if possible
-					vm::reservation_notifier(prev_resv).notify_all();
+					vm::reservation_notifier_notify(prev_resv);
 				}
 
 				prev_resv = resv;
@@ -1409,7 +1398,7 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 
 	if (prev_resv)
 	{
-		vm::reservation_notifier(prev_resv).notify_all();
+		vm::reservation_notifier_notify(prev_resv);
 	}
 
 	group->exit_status = value;
@@ -1749,9 +1738,23 @@ error_code sys_spu_thread_write_spu_mb(ppu_thread& ppu, u32 id, u32 value)
 		return CELL_ESRCH;
 	}
 
-	std::lock_guard lock(group->mutex);
+	spu_channel_op_state state{};
+	{
+		std::lock_guard lock(group->mutex);
 
-	thread->ch_in_mbox.push(value);
+		state = thread->ch_in_mbox.push(value, true);
+	}
+
+	if (!state.op_done)
+	{
+		ppu.state += cpu_flag::again;
+		return {};
+	}
+
+	if (state.notify)
+	{
+		thread->ch_in_mbox.notify();
+	}
 
 	return CELL_OK;
 }

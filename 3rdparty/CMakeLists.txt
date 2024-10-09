@@ -4,6 +4,9 @@ include(CMakeDependentOption)
 
 set(CMAKE_CXX_STANDARD 20)
 
+# Defines the ARCHITECTURE variable
+include("DetectArchitecture.cmake")
+
 # Warnings are silenced for 3rdparty code
 if(NOT MSVC)
 	add_compile_options("$<$<COMPILE_LANGUAGE:CXX,C>:-w>")
@@ -86,7 +89,6 @@ add_subdirectory(hidapi)
 
 # Vulkan
 add_subdirectory(glslang EXCLUDE_FROM_ALL)
-#add_subdirectory(SPIRV EXCLUDE_FROM_ALL)
 
 
 # yaml-cpp
@@ -108,7 +110,7 @@ endif()
 
 # OpenGL
 
-find_package(OpenGL REQUIRED)
+find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS EGL)
 
 add_library(3rdparty_opengl INTERFACE)
 target_include_directories(3rdparty_opengl INTERFACE GL)
@@ -224,7 +226,7 @@ if(USE_FAUDIO)
 	if (USE_SYSTEM_FAUDIO)
 		if (NOT SDL2_FOUND OR SDL2_VERSION VERSION_LESS 2.0.12)
 			message(WARNING
-				"RPCS3: FAudio requires SDL 2.0.9 or newer. Please note, this warning"
+				"RPCS3: System FAudio requires SDL 2.0.9 or newer. Please note, this warning"
 				"can also be displayed with SDL2 versions between 2.0.9-2.0.12, as the"
 				"CMake config files are not correctly installed. Since a valid SDL2"
 				">=2.0.9 version cannot be found, building with FAudio will be skipped.")
@@ -247,8 +249,8 @@ if(USE_FAUDIO)
 			message(STATUS "RPCS3: Using builtin FAudio")
 			set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library")
 			add_subdirectory(FAudio EXCLUDE_FROM_ALL)
-			target_compile_definitions(FAudio INTERFACE -DHAVE_FAUDIO)
-			set(FAUDIO_TARGET FAudio)
+			target_compile_definitions(FAudio-static INTERFACE -DHAVE_FAUDIO)
+			set(FAUDIO_TARGET FAudio-static)
 		endif()
 	endif()
 endif()
@@ -267,37 +269,29 @@ if(USE_SYSTEM_FFMPEG)
 	target_include_directories(3rdparty_ffmpeg INTERFACE ${FFMPEG_INCLUDE_DIR})
 	target_link_libraries(3rdparty_ffmpeg INTERFACE ${FFMPEG_LIBRARIES})
 else()
-	if (NOT MSVC AND WIN32)
-		message(FATAL_ERROR "-- RPCS3: building ffmpeg submodule is currently not supported")
-	else()
-		message(STATUS "RPCS3: using builtin ffmpeg")
+	message(STATUS "RPCS3: using builtin ffmpeg")
+	add_subdirectory(ffmpeg EXCLUDE_FROM_ALL)
+	# ffmpeg-core libraries are extracted to CMAKE_BINARY_DIR
+	set(FFMPEG_LIB_DIR "${CMAKE_BINARY_DIR}/3rdparty/ffmpeg/lib")
 
-		if (WIN32)
-			set(FFMPEG_LIB_DIR "ffmpeg/lib/windows/x86_64")
-			target_link_libraries(3rdparty_ffmpeg INTERFACE "Bcrypt.lib")
-		elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-			set(FFMPEG_LIB_DIR "ffmpeg/lib/linux/ubuntu-20.04/x86_64")
-		elseif(APPLE)
-			set(FFMPEG_LIB_DIR "ffmpeg/lib/macos/x86_64")
-		else()
-			message(FATAL_ERROR "Prebuilt ffmpeg is not available on this platform! Try USE_SYSTEM_FFMPEG=ON.")
-		endif()
-
-		find_library(FFMPEG_LIB_AVFORMAT avformat PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
-		find_library(FFMPEG_LIB_AVCODEC avcodec PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
-		find_library(FFMPEG_LIB_AVUTIL avutil PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
-		find_library(FFMPEG_LIB_SWSCALE swscale PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
-		find_library(FFMPEG_LIB_SWRESAMPLE swresample PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
-
-		target_link_libraries(3rdparty_ffmpeg
-		INTERFACE
-			${FFMPEG_LIB_AVFORMAT}
-			${FFMPEG_LIB_AVCODEC}
-			${FFMPEG_LIB_AVUTIL}
-			${FFMPEG_LIB_SWSCALE}
-			${FFMPEG_LIB_SWRESAMPLE}
-		)
+	if (WIN32)
+		target_link_libraries(3rdparty_ffmpeg INTERFACE "Bcrypt.lib")
 	endif()
+
+	find_library(FFMPEG_LIB_AVFORMAT avformat PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
+	find_library(FFMPEG_LIB_AVCODEC avcodec PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
+	find_library(FFMPEG_LIB_AVUTIL avutil PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
+	find_library(FFMPEG_LIB_SWSCALE swscale PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
+	find_library(FFMPEG_LIB_SWRESAMPLE swresample PATHS ${FFMPEG_LIB_DIR} NO_DEFAULT_PATH)
+
+	target_link_libraries(3rdparty_ffmpeg
+	INTERFACE
+		${FFMPEG_LIB_AVFORMAT}
+		${FFMPEG_LIB_AVCODEC}
+		${FFMPEG_LIB_AVUTIL}
+		${FFMPEG_LIB_SWSCALE}
+		${FFMPEG_LIB_SWRESAMPLE}
+	)
 
 	target_include_directories(3rdparty_ffmpeg INTERFACE "ffmpeg/include")
 endif()
@@ -329,8 +323,7 @@ if(USE_SDL)
 			message(STATUS "Using system SDL2")
 			add_library(3rdparty_sdl2 INTERFACE)
 			target_compile_definitions(3rdparty_sdl2 INTERFACE -DHAVE_SDL2=1)
-			target_include_directories(3rdparty_sdl2 INTERFACE ${SDL2_INCLUDE_DIRS})
-			target_link_libraries(3rdparty_sdl2 INTERFACE ${SDL2_LIBRARIES})
+			target_link_libraries(3rdparty_sdl2 INTERFACE SDL2::SDL2)
 			set(SDL2_TARGET 3rdparty_sdl2)
 		else()
 			message(FATAL_ERROR "SDL2 is not available on this system")

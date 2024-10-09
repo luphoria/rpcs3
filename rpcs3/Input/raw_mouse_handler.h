@@ -42,7 +42,7 @@ public:
 
 	const std::string& device_name() const { return m_device_name; }
 	u32 index() const { return m_index; }
-	void set_index(u32 index) { m_index = index; }
+	void set_index(u32 index);
 	void request_reload() { reload_requested = true; }
 
 private:
@@ -108,7 +108,7 @@ private:
 
 #ifdef _WIN32
 	void register_raw_input_devices();
-	void unregister_raw_input_devices();
+	void unregister_raw_input_devices() const;
 	bool m_registered_raw_input_devices = false;
 #endif
 

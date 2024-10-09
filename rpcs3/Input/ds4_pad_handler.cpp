@@ -85,6 +85,10 @@ ds4_pad_handler::ds4_pad_handler()
 		{ DS4KeyCodes::Share,    "Share" },
 		{ DS4KeyCodes::PSButton, "PS Button" },
 		{ DS4KeyCodes::TouchPad, "Touch Pad" },
+		{ DS4KeyCodes::Touch_L,  "Touch Left" },
+		{ DS4KeyCodes::Touch_R,  "Touch Right" },
+		{ DS4KeyCodes::Touch_U,  "Touch Up" },
+		{ DS4KeyCodes::Touch_D,  "Touch Down" },
 		{ DS4KeyCodes::L1,       "L1" },
 		{ DS4KeyCodes::L2,       "L2" },
 		{ DS4KeyCodes::L3,       "L3" },
@@ -113,12 +117,33 @@ ds4_pad_handler::ds4_pad_handler()
 	b_has_led = true;
 	b_has_rgb = true;
 	b_has_battery = true;
+	b_has_battery_led = true;
 
 	m_name_string = "DS4 Pad #";
 	m_max_devices = CELL_PAD_MAX_PORT_NUM;
 
 	m_trigger_threshold = trigger_max / 2;
 	m_thumb_threshold = thumb_max / 2;
+}
+
+ds4_pad_handler::~ds4_pad_handler()
+{
+	for (auto& controller : m_controllers)
+	{
+		if (controller.second && controller.second->hidDevice)
+		{
+			// Disable blinking and vibration
+			controller.second->small_motor = 0;
+			controller.second->large_motor = 0;
+			controller.second->led_delay_on = 0;
+			controller.second->led_delay_off = 0;
+
+			if (send_output_report(controller.second.get()) == -1)
+			{
+				ds4_log.error("~ds4_pad_handler: send_output_report failed! error=%s", hid_error(controller.second->hidDevice));
+			}
+		}
+	}
 }
 
 void ds4_pad_handler::init_config(cfg_pad* cfg)
@@ -153,6 +178,7 @@ void ds4_pad_handler::init_config(cfg_pad* cfg)
 	cfg->l3.def       = ::at32(button_list, DS4KeyCodes::L3);
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, DS4KeyCodes::None);
+	cfg->analog_limiter_button.def = ::at32(button_list, DS4KeyCodes::None);
 
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
@@ -218,17 +244,20 @@ void ds4_pad_handler::SetPadData(const std::string& padId, u8 player_id, u8 larg
 	}
 
 	// Start/Stop the engines :)
-	send_output_report(device.get());
+	if (send_output_report(device.get()) == -1)
+	{
+		ds4_log.error("SetPadData: send_output_report failed! error=%s", hid_error(device->hidDevice));
+	}
 }
 
 std::unordered_map<u64, u16> ds4_pad_handler::get_button_values(const std::shared_ptr<PadDevice>& device)
 {
 	std::unordered_map<u64, u16> keyBuffer;
-	DS4Device* ds4_dev = static_cast<DS4Device*>(device.get());
-	if (!ds4_dev)
+	DS4Device* dev = static_cast<DS4Device*>(device.get());
+	if (!dev)
 		return keyBuffer;
 
-	const ds4_input_report_common& input = ds4_dev->bt_controller ? ds4_dev->report_bt.common : ds4_dev->report_usb.common;
+	const ds4_input_report_common& input = dev->bt_controller ? dev->report_bt.common : dev->report_usb.common;
 
 	// Left Stick X Axis
 	keyBuffer[DS4KeyCodes::LSXNeg] = Clamp0To255((127.5f - input.x) * 2.0f);
@@ -331,6 +360,47 @@ std::unordered_map<u64, u16> ds4_pad_handler::get_button_values(const std::share
 	// L2, R2
 	keyBuffer[DS4KeyCodes::L2] = input.z;
 	keyBuffer[DS4KeyCodes::R2] = input.rz;
+
+	// Touch Pad
+	const auto apply_touch = [&keyBuffer](const ds4_touch_report& touch)
+	{
+		for (const ds4_touch_point& point : touch.points)
+		{
+			if (!(point.contact & DS4_TOUCH_POINT_INACTIVE))
+			{
+				const s32 x = (point.x_hi << 8) | point.x_lo;
+				const s32 y = (point.y_hi << 4) | point.y_lo;
+
+				const f32 x_scaled = ScaledInput(static_cast<float>(x), 0.0f, static_cast<float>(DS4_TOUCHPAD_WIDTH), 0.0f, 255.0f);
+				const f32 y_scaled = ScaledInput(static_cast<float>(y), 0.0f, static_cast<float>(DS4_TOUCHPAD_HEIGHT), 0.0f, 255.0f);
+
+				keyBuffer[DS4KeyCodes::Touch_L] = Clamp0To255((127.5f - x_scaled) * 2.0f);
+				keyBuffer[DS4KeyCodes::Touch_R] = Clamp0To255((x_scaled - 127.5f) * 2.0f);
+
+				keyBuffer[DS4KeyCodes::Touch_U] = Clamp0To255((127.5f - y_scaled) * 2.0f);
+				keyBuffer[DS4KeyCodes::Touch_D] = Clamp0To255((y_scaled - 127.5f) * 2.0f);
+			}
+		}
+	};
+
+	if (dev->bt_controller)
+	{
+		const ds4_input_report_bt& report = dev->report_bt;
+
+		for (u32 i = 0; i < std::min<u32>(report.num_touch_reports, ::size32(report.touch_reports)); i++)
+		{
+			apply_touch(report.touch_reports[i]);
+		}
+	}
+	else
+	{
+		const ds4_input_report_usb& report = dev->report_usb;
+
+		for (u32 i = 0; i < std::min<u32>(report.num_touch_reports, ::size32(report.touch_reports)); i++)
+		{
+			apply_touch(report.touch_reports[i]);
+		}
+	}
 
 	return keyBuffer;
 }
@@ -527,8 +597,7 @@ void ds4_pad_handler::check_add_device(hid_device* hidDevice, std::string_view p
 	if (!GetCalibrationData(device))
 	{
 		ds4_log.error("check_add_device: GetCalibrationData failed!");
-		hid_close(hidDevice);
-		device->hidDevice = nullptr;
+		device->close();
 		return;
 	}
 
@@ -553,8 +622,7 @@ void ds4_pad_handler::check_add_device(hid_device* hidDevice, std::string_view p
 	if (hid_set_nonblocking(hidDevice, 1) == -1)
 	{
 		ds4_log.error("check_add_device: hid_set_nonblocking failed! Reason: %s", hid_error(hidDevice));
-		hid_close(hidDevice);
-		device->hidDevice = nullptr;
+		device->close();
 		return;
 	}
 
@@ -567,22 +635,6 @@ void ds4_pad_handler::check_add_device(hid_device* hidDevice, std::string_view p
 	}
 
 	ds4_log.notice("Added device: bluetooth=%d, serial='%s', hw_version: 0x%x, fw_version: 0x%x, path='%s'", device->bt_controller, serial, hw_version, fw_version, device->path);
-}
-
-ds4_pad_handler::~ds4_pad_handler()
-{
-	for (auto& controller : m_controllers)
-	{
-		if (controller.second && controller.second->hidDevice)
-		{
-			// Disable blinking and vibration
-			controller.second->small_motor = 0;
-			controller.second->large_motor = 0;
-			controller.second->led_delay_on = 0;
-			controller.second->led_delay_off = 0;
-			send_output_report(controller.second.get());
-		}
-	}
 }
 
 int ds4_pad_handler::send_output_report(DS4Device* device)
@@ -760,25 +812,42 @@ bool ds4_pad_handler::get_is_right_stick(const std::shared_ptr<PadDevice>& /*dev
 	}
 }
 
+bool ds4_pad_handler::get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+{
+	switch (keyCode)
+	{
+	case DS4KeyCodes::Touch_L:
+	case DS4KeyCodes::Touch_R:
+	case DS4KeyCodes::Touch_U:
+	case DS4KeyCodes::Touch_D:
+		return true;
+	default:
+		return false;
+	}
+}
+
 PadHandlerBase::connection ds4_pad_handler::update_connection(const std::shared_ptr<PadDevice>& device)
 {
-	DS4Device* ds4_dev = static_cast<DS4Device*>(device.get());
-	if (!ds4_dev || ds4_dev->path.empty())
+	DS4Device* dev = static_cast<DS4Device*>(device.get());
+	if (!dev || dev->path.empty())
 		return connection::disconnected;
 
-	if (ds4_dev->hidDevice == nullptr)
+	if (dev->hidDevice == nullptr)
 	{
 		// try to reconnect
-		hid_device* dev = hid_open_path(ds4_dev->path.c_str());
-		if (dev)
+		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
 		{
-			if (hid_set_nonblocking(dev, 1) == -1)
+			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
-				ds4_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", ds4_dev->path, hid_error(dev));
+				ds4_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", dev->path, hid_error(hid_dev));
 			}
-			ds4_dev->hidDevice = dev;
-			if (!ds4_dev->has_calib_data)
-				ds4_dev->has_calib_data = GetCalibrationData(ds4_dev);
+
+			dev->hidDevice = hid_dev;
+
+			if (!dev->has_calib_data)
+			{
+				dev->has_calib_data = GetCalibrationData(dev);
+			}
 		}
 		else
 		{
@@ -787,11 +856,10 @@ PadHandlerBase::connection ds4_pad_handler::update_connection(const std::shared_
 		}
 	}
 
-	if (get_data(ds4_dev) == DataStatus::ReadError)
+	if (get_data(dev) == DataStatus::ReadError)
 	{
 		// this also can mean disconnected, either way deal with it on next loop and reconnect
-		hid_close(ds4_dev->hidDevice);
-		ds4_dev->hidDevice = nullptr;
+		dev->close();
 
 		return connection::no_data;
 	}
@@ -804,14 +872,14 @@ void ds4_pad_handler::get_extended_info(const pad_ensemble& binding)
 	const auto& device = binding.device;
 	const auto& pad = binding.pad;
 
-	DS4Device* ds4_device = static_cast<DS4Device*>(device.get());
-	if (!ds4_device || !pad)
+	DS4Device* dev = static_cast<DS4Device*>(device.get());
+	if (!dev || !pad)
 		return;
 
-	const ds4_input_report_common& input = ds4_device->bt_controller ? ds4_device->report_bt.common : ds4_device->report_usb.common;
+	const ds4_input_report_common& input = dev->bt_controller ? dev->report_bt.common : dev->report_usb.common;
 
-	pad->m_battery_level = ds4_device->battery_level;
-	pad->m_cable_state   = ds4_device->cable_state;
+	pad->m_battery_level = dev->battery_level;
+	pad->m_cable_state   = dev->cable_state;
 
 	// these values come already calibrated, all we need to do is convert to ds3 range
 
@@ -845,11 +913,11 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	const auto& device = binding.device;
 	const auto& pad = binding.pad;
 
-	DS4Device* ds4_dev = static_cast<DS4Device*>(device.get());
-	if (!ds4_dev || !ds4_dev->hidDevice || !ds4_dev->config || !pad)
+	DS4Device* dev = static_cast<DS4Device*>(device.get());
+	if (!dev || !dev->hidDevice || !dev->config || !pad)
 		return;
 
-	cfg_pad* config = ds4_dev->config;
+	cfg_pad* config = dev->config;
 
 	// Attempt to send rumble no matter what
 	const int idx_l = config->switch_vibration_motors ? 1 : 0;
@@ -858,9 +926,9 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	const u8 speed_large = config->enable_vibration_motor_large ? pad->m_vibrateMotors[idx_l].m_value : 0;
 	const u8 speed_small = config->enable_vibration_motor_small ? pad->m_vibrateMotors[idx_s].m_value : 0;
 
-	const bool wireless    = ds4_dev->cable_state == 0;
-	const bool low_battery = ds4_dev->battery_level < 2;
-	const bool is_blinking = ds4_dev->led_delay_on > 0 || ds4_dev->led_delay_off > 0;
+	const bool wireless    = dev->cable_state == 0;
+	const bool low_battery = dev->battery_level < 2;
+	const bool is_blinking = dev->led_delay_on > 0 || dev->led_delay_off > 0;
 
 	// Blink LED when battery is low
 	if (config->led_low_battery_blink)
@@ -868,16 +936,16 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 		// we are now wired or have okay battery level -> stop blinking
 		if (is_blinking && !(wireless && low_battery))
 		{
-			ds4_dev->led_delay_on = 0;
-			ds4_dev->led_delay_off = 0;
-			ds4_dev->new_output_data = true;
+			dev->led_delay_on = 0;
+			dev->led_delay_off = 0;
+			dev->new_output_data = true;
 		}
 		// we are now wireless and low on battery -> blink
 		else if (!is_blinking && wireless && low_battery)
 		{
-			ds4_dev->led_delay_on = 100;
-			ds4_dev->led_delay_off = 100;
-			ds4_dev->new_output_data = true;
+			dev->led_delay_on = 100;
+			dev->led_delay_off = 100;
+			dev->new_output_data = true;
 		}
 	}
 
@@ -885,27 +953,35 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	if (config->led_battery_indicator)
 	{
 		// This makes sure that the LED color doesn't update every 1ms. DS4 only reports battery level in 10% increments
-		if (ds4_dev->last_battery_level != ds4_dev->battery_level)
+		if (dev->last_battery_level != dev->battery_level)
 		{
-			const u32 combined_color = get_battery_color(ds4_dev->battery_level, config->led_battery_indicator_brightness);
+			const u32 combined_color = get_battery_color(dev->battery_level, config->led_battery_indicator_brightness);
 			config->colorR.set(combined_color >> 8);
 			config->colorG.set(combined_color & 0xff);
 			config->colorB.set(0);
-			ds4_dev->new_output_data = true;
-			ds4_dev->last_battery_level = ds4_dev->battery_level;
+			dev->new_output_data = true;
+			dev->last_battery_level = dev->battery_level;
 		}
 	}
 
-	ds4_dev->new_output_data |= ds4_dev->large_motor != speed_large || ds4_dev->small_motor != speed_small;
+	dev->new_output_data |= dev->large_motor != speed_large || dev->small_motor != speed_small;
 
-	ds4_dev->large_motor = speed_large;
-	ds4_dev->small_motor = speed_small;
+	dev->large_motor = speed_large;
+	dev->small_motor = speed_small;
 
-	if (ds4_dev->new_output_data)
+	const auto now = steady_clock::now();
+	const auto elapsed = now - dev->last_output;
+
+	if (dev->new_output_data || elapsed > min_output_interval)
 	{
-		if (send_output_report(ds4_dev) >= 0)
+		if (const int res = send_output_report(dev); res >= 0)
 		{
-			ds4_dev->new_output_data = false;
+			dev->new_output_data = false;
+			dev->last_output = now;
+		}
+		else if (res == -1)
+		{
+			ds4_log.error("apply_pad_data: send_output_report failed! error=%s", hid_error(dev->hidDevice));
 		}
 	}
 }

@@ -20,8 +20,10 @@ void basic_mouse_handler::Init(const u32 max_connect)
 		return;
 	}
 
-	g_cfg_mouse.from_default();
-	g_cfg_mouse.load();
+	if (!g_cfg_mouse.load())
+	{
+		input_log.notice("basic_mouse_handler: Could not load basic mouse config. Using defaults.");
+	}
 
 	reload_config();
 
@@ -47,6 +49,8 @@ void basic_mouse_handler::Init(const u32 max_connect)
 
 void basic_mouse_handler::reload_config()
 {
+	input_log.notice("Basic mouse config=\n%s", g_cfg_mouse.to_string());
+
 	m_buttons[CELL_MOUSE_BUTTON_1] = get_mouse_button(g_cfg_mouse.mouse_button_1);
 	m_buttons[CELL_MOUSE_BUTTON_2] = get_mouse_button(g_cfg_mouse.mouse_button_2);
 	m_buttons[CELL_MOUSE_BUTTON_3] = get_mouse_button(g_cfg_mouse.mouse_button_3);
@@ -76,7 +80,18 @@ void basic_mouse_handler::SetTargetWindow(QWindow* target)
 
 bool basic_mouse_handler::eventFilter(QObject* target, QEvent* ev)
 {
-	if (!ev)
+	if (m_info.max_connect == 0)
+	{
+		// Not initialized
+		return false;
+	}
+
+	if (!ev) [[unlikely]]
+	{
+		return false;
+	}
+
+	if (input::g_active_mouse_and_keyboard != input::active_mouse_and_keyboard::emulated)
 	{
 		return false;
 	}
@@ -113,7 +128,10 @@ bool basic_mouse_handler::eventFilter(QObject* target, QEvent* ev)
 
 void basic_mouse_handler::MouseButtonDown(QMouseEvent* event)
 {
-	if (!event) return;
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
 
 	const int button = event->button();
 	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [button](const auto& entry){ return entry.second == button; });
@@ -125,7 +143,10 @@ void basic_mouse_handler::MouseButtonDown(QMouseEvent* event)
 
 void basic_mouse_handler::MouseButtonUp(QMouseEvent* event)
 {
-	if (!event) return;
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
 
 	const int button = event->button();
 	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [button](const auto& entry){ return entry.second == button; });
@@ -137,7 +158,10 @@ void basic_mouse_handler::MouseButtonUp(QMouseEvent* event)
 
 void basic_mouse_handler::MouseScroll(QWheelEvent* event)
 {
-	if (!event) return;
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
 
 	const QPoint delta = event->angleDelta();
 	const s8 x = std::clamp(delta.x() / 120, -128, 127);
@@ -167,7 +191,10 @@ int basic_mouse_handler::get_mouse_button(const cfg::string& button)
 
 void basic_mouse_handler::MouseMove(QMouseEvent* event)
 {
-	if (!event) return;
+	if (!event) [[unlikely]]
+	{
+		return;
+	}
 
 	if (is_time_for_update())
 	{

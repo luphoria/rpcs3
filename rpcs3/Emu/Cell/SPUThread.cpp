@@ -444,12 +444,9 @@ waitpkg_func static void __tpause(u32 cycles, u32 cstate)
 }
 #endif
 
-static std::array<atomic_t<u8>, 128> g_resrv_waiters_count;
-
-static inline atomic_t<u8>& get_resrv_waiters_count(u32 raddr)
+namespace vm
 {
-	// Storage efficient method to distinguish different nearby addresses (which are likely)
-	 return g_resrv_waiters_count[std::popcount(raddr) + ((raddr / 128) % 4) * 32];
+	std::array<atomic_t<reservation_waiter_t>, 512> g_resrv_waiters_count{};
 }
 
 void do_cell_atomic_128_store(u32 addr, const void* to_write);
@@ -851,6 +848,8 @@ const auto spu_putllc_tx = build_function_asm<u64(*)(u32 raddr, u64 rtime, void*
 	maybe_flush_lbr(c);
 	c.ret();
 #else
+	UNUSED(args);
+
 	c.brk(Imm(0x42));
 	c.ret(a64::x30);
 #endif
@@ -975,6 +974,8 @@ const auto spu_putlluc_tx = build_function_asm<u64(*)(u32 raddr, const void* rda
 	maybe_flush_lbr(c);
 	c.ret();
 #else
+	UNUSED(args);
+
 	c.brk(Imm(0x42));
 	c.ret(a64::x30);
 #endif
@@ -1108,6 +1109,8 @@ const auto spu_getllar_tx = build_function_asm<u64(*)(u32 raddr, void* rdata, cp
 	maybe_flush_lbr(c);
 	c.ret();
 #else
+	UNUSED(args);
+
 	c.brk(Imm(0x42));
 	c.ret(a64::x30);
 #endif
@@ -1330,8 +1333,24 @@ void spu_thread::dump_regs(std::string& ret, std::any& /*custom_data*/) const
 	}
 
 	const u32 addr = raddr;
+	const u64 rtime0 = rtime;
 
-	fmt::append(ret, "Reservation Addr: %s\n", addr ? fmt::format("0x%x", addr) : "N/A");
+	if (vm::check_addr(addr))
+	{
+		fmt::append(ret, "Reservation Addr: 0x%x\n", addr);
+		fmt::append(ret, "Reservation Time: 0x%x\n", rtime0 & 0xff'ff'ff);
+	}
+	else if (addr)
+	{
+		fmt::append(ret, "Reservation Addr: 0x%x (unmapped)\n", addr);
+		fmt::append(ret, "Reservation Time: 0x%x\n", rtime0 & 0xff'ff'ff);
+	}
+	else
+	{
+		fmt::append(ret, "Reservation Addr: N/A\n");
+		fmt::append(ret, "Reservation Time: N/A\n");
+	}
+
 	fmt::append(ret, "Reservation Data:\n");
 
 	be_t<u32> data[32]{};
@@ -1804,17 +1823,28 @@ void spu_thread::cpu_task()
 		return fmt::format("%sSPU[0x%07x] Thread (%s) [0x%05x]", type >= spu_type::raw ? type == spu_type::isolated ? "Iso" : "Raw" : "", cpu->lv2_id, *name_cache.get(), cpu->pc);
 	};
 
-	if (!spurs_addr)
+	constexpr u32 invalid_spurs = 0u - 0x80;
+
+	if (spurs_addr == 0)
 	{
 		// Evaluate it
 		if (!group)
 		{
-			spurs_addr = -0x80; // Some invalid non-0 address
+			spurs_addr = invalid_spurs; // Some invalid non-0 address
 		}
 		else
 		{
 			const u32 arg = static_cast<u32>(group->args[index][1]);
-			spurs_addr = group->name.ends_with("CellSpursKernelGroup"sv) && vm::check_addr(arg) ? arg : 0u - 0x80;
+
+			if (group->name.ends_with("CellSpursKernelGroup"sv) && vm::check_addr(arg))
+			{
+				spurs_addr = arg;
+				group->spurs_running++;
+			}
+			else
+			{
+				spurs_addr = invalid_spurs;
+			}
 		}
 	}
 
@@ -1864,6 +1894,14 @@ void spu_thread::cpu_task()
 		}
 
 		allow_interrupts_in_cpu_work = false;
+	}
+
+	if (spurs_addr != invalid_spurs)
+	{
+		if (group->spurs_running.exchange(0))
+		{
+			group->spurs_running.notify_all();
+		}
 	}
 }
 
@@ -2062,6 +2100,8 @@ spu_thread::spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u
 	}
 
 	range_lock = vm::alloc_range_lock();
+
+	memset(&hv_ctx, 0, sizeof(hv_ctx));
 }
 
 void spu_thread::serialize_common(utils::serial& ar)
@@ -2235,7 +2275,7 @@ void spu_thread::push_snr(u32 number, u32 value)
 	const bool bitor_bit = !!((snr_config >> number) & 1);
 
 	// Redundant, g_use_rtm is checked inside tx_start now.
-	if (g_use_rtm)
+	if (g_use_rtm && false)
 	{
 		bool channel_notify = false;
 		bool thread_notify = false;
@@ -2295,8 +2335,21 @@ void spu_thread::push_snr(u32 number, u32 value)
 	});
 
 	// Check corresponding SNR register settings
-	if (channel->push(value, bitor_bit))
+	auto push_state = channel->push(value, bitor_bit);
+
+	if (push_state.old_count < push_state.count)
+	{
 		set_events(event_bit);
+	}
+	else if (!push_state.op_done)
+	{
+		ensure(is_stopped());
+
+		if (auto cpu = cpu_thread::get_current())
+		{
+			cpu->state += cpu_flag::again;
+		}
+	}
 
 	ch_events.atomic_op([](ch_events_t& ev)
 	{
@@ -2803,6 +2856,46 @@ void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8*
 		}
 		default:
 		{
+			if (eal >> 28 == rsx::constants::local_mem_base >> 28)
+			{
+				if (size > s_rep_movsb_threshold)
+				{
+					__movsb(dst, src, size);
+				}
+				else
+				{
+					// Avoid unaligned stores in mov_rdata_avx
+					if (reinterpret_cast<u64>(dst) & 0x10)
+					{
+						*reinterpret_cast<v128*>(dst) = *reinterpret_cast<const v128*>(src);
+
+						dst += 16;
+						src += 16;
+						size -= 16;
+					}
+
+					while (size >= 128)
+					{
+						mov_rdata(*reinterpret_cast<spu_rdata_t*>(dst), *reinterpret_cast<const spu_rdata_t*>(src));
+
+						dst += 128;
+						src += 128;
+						size -= 128;
+					}
+
+					while (size)
+					{
+						*reinterpret_cast<v128*>(dst) = *reinterpret_cast<const v128*>(src);
+
+						dst += 16;
+						src += 16;
+						size -= 16;
+					}
+				}
+
+				break;
+			}
+
 			if (((eal & 127) + size) <= 128)
 			{
 				vm::range_lock(range_lock, eal, size);
@@ -3476,13 +3569,21 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
 			arg_lsa += utils::align<u32>(size, 16);
 		}
 		// Avoid inlining huge transfers because it intentionally drops range lock unlock
-		else if (addr < RAW_SPU_BASE_ADDR && size - 1 <= 0x400 - 1 && optimization_compatible == MFC_PUT_CMD && (addr % 0x10000 + (size - 1)) < 0x10000)
+		else if (optimization_compatible == MFC_PUT_CMD && ((addr >> 28 == rsx::constants::local_mem_base >> 28) || (addr < RAW_SPU_BASE_ADDR && size - 1 <= 0x400 - 1 && (addr % 0x10000 + (size - 1)) < 0x10000)))
 		{
-			rsx_lock.update_if_enabled(addr, size, range_lock);
-
-			if (!g_use_rtm)
+			if (addr >> 28 != rsx::constants::local_mem_base >> 28)
 			{
-				vm::range_lock(range_lock, addr & -128, utils::align<u32>(addr + size, 128) - (addr & -128));
+				rsx_lock.update_if_enabled(addr, size, range_lock);
+
+				if (!g_use_rtm)
+				{
+					vm::range_lock(range_lock, addr & -128, utils::align<u32>(addr + size, 128) - (addr & -128));
+				}
+			}
+			else
+			{
+				range_lock->release(0);
+				rsx_lock.unlock();
 			}
 
 			u8* dst = vm::_ptr<u8>(addr);
@@ -3791,7 +3892,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
 	{
 		if (raddr)
 		{
-			vm::reservation_notifier(addr).notify_all();
+			vm::reservation_notifier_notify(addr);
 			raddr = 0;
 		}
 
@@ -3981,7 +4082,7 @@ void spu_thread::do_putlluc(const spu_mfc_cmd& args)
 	}
 
 	do_cell_atomic_128_store(addr, _ptr<spu_rdata_t>(args.lsa & 0x3ff80));
-	vm::reservation_notifier(addr).notify_all();
+	vm::reservation_notifier_notify(addr);
 }
 
 bool spu_thread::do_mfc(bool can_escape, bool must_finish)
@@ -4451,7 +4552,7 @@ bool spu_thread::process_mfc_cmd()
 						if ([&]() -> bool
 						{
 							// Validation that it is indeed GETLLAR spinning (large time window is intentional)
-							if (last_getllar_addr != addr || last_getllar != pc || last_getllar_gpr1 != gpr[1]._u32[3] || perf0.get() - last_gtsc >= 5'000 || (interrupts_enabled && ch_events.load().mask))
+							if (last_getllar_addr != addr || last_getllar_gpr1 != gpr[1]._u32[3] || perf0.get() - last_gtsc >= 5'000 || (interrupts_enabled && ch_events.load().mask))
 							{
 								// Seemingly not
 								getllar_busy_waiting_switch = umax;
@@ -4471,7 +4572,7 @@ bool spu_thread::process_mfc_cmd()
 								if (percent != 101)
 								{
 									// Predict whether or not to use operating system sleep based on history
-									auto& stats = getllar_wait_time[pc / 32];
+									auto& stats = getllar_wait_time[(addr % SPU_LS_SIZE) / 128];
 
 									const auto old_stats = stats;
 									std::array<u8, 4> new_stats{};
@@ -4531,7 +4632,7 @@ bool spu_thread::process_mfc_cmd()
 								if (percent != 101)
 								{
 									spu_log.trace("SPU wait for 0x%x", addr);
-									getllar_wait_time[pc / 32].front() = 1;
+									getllar_wait_time[(addr % SPU_LS_SIZE) / 128].front() = 1;
 									getllar_busy_waiting_switch = 0;
 								}
 							}
@@ -4554,7 +4655,7 @@ bool spu_thread::process_mfc_cmd()
 
 							if (getllar_busy_waiting_switch == 1)
 							{
-								getllar_wait_time[pc / 32].front() = 0;
+								getllar_wait_time[(addr % SPU_LS_SIZE) / 128].front() = 0;
 
 #if defined(ARCH_X64)
 								if (utils::has_um_wait())
@@ -4594,12 +4695,13 @@ bool spu_thread::process_mfc_cmd()
 						// Spinning, might as well yield cpu resources
 						state += cpu_flag::wait;
 
-						// Storage efficient method to distinguish different nearby addresses (which are likely)
-						get_resrv_waiters_count(addr)++;
+						if (auto wait_var = vm::reservation_notifier_begin_wait(addr, rtime))
+						{
+							utils::bless<atomic_t<u32>>(&wait_var->raw().wait_flag)->wait(1, atomic_wait_timeout{100'000});
+							vm::reservation_notifier_end_wait(*wait_var);
+						}
 
-						vm::reservation_notifier(addr).wait(this_time, atomic_wait_timeout{100'000});
-
-						get_resrv_waiters_count(addr)--;
+						static_cast<void>(test_stopped());
 
 						// Quick check if there were reservation changes
 						const u64 new_time = res;
@@ -4619,10 +4721,10 @@ bool spu_thread::process_mfc_cmd()
 							{
 								// Reservation was lost but the data itself remains unchanged so try to ignore it
 								set_events(SPU_EVENT_LR);
-								rtime = this_time;
+								rtime = new_time;
 							}
 
-							u8& val = getllar_wait_time[pc / 32].front();
+							u8& val = getllar_wait_time[(addr % SPU_LS_SIZE) / 128].front();
 							val = static_cast<u8>(std::min<u32>(val + 1, u8{umax}));
 
 							// Reset perf
@@ -4639,10 +4741,10 @@ bool spu_thread::process_mfc_cmd()
 
 							g_unchanged++;
 
-							// Try to forcefully change timestamp in order to notify threads
-							if (get_resrv_waiters_count(addr) && res.compare_and_swap_test(this_time, this_time + 128))
+							// Notify threads manually, memory data has likely changed and broke the reservation for others
+							if (vm::reservation_notifier_count(addr) && res == new_time)
 							{
-								vm::reservation_notifier(addr).notify_all();
+								vm::reservation_notifier_notify(addr);
 							}
 						}
 						else
@@ -4659,10 +4761,10 @@ bool spu_thread::process_mfc_cmd()
 
 				if (this_time == rtime)
 				{
-					// Try to forcefully change timestamp in order to notify threads
-					if (get_resrv_waiters_count(addr) && res.compare_and_swap_test(this_time, this_time + 128))
+					// Notify threads manually, memory data has likely changed and broke the reservation for others
+					if (vm::reservation_notifier_count(addr) && res == this_time)
 					{
-						vm::reservation_notifier(addr).notify_all();
+						vm::reservation_notifier_notify(addr);
 					}
 				}
 
@@ -4707,8 +4809,9 @@ bool spu_thread::process_mfc_cmd()
 				}
 			}
 
-			if (++i < 25) [[likely]]
+			if (i < 24) [[likely]]
 			{
+				i++;
 				busy_wait(300);
 			}
 			else
@@ -4787,9 +4890,100 @@ bool spu_thread::process_mfc_cmd()
 		// Avoid logging useless commands if there is no reservation
 		const bool dump = g_cfg.core.mfc_debug && raddr;
 
+		const bool is_spurs_task_wait = pc == 0x11e4 && spurs_addr == raddr && g_cfg.core.max_spurs_threads != g_cfg.core.max_spurs_threads.def && !spurs_waited;
+
+		if (is_spurs_task_wait)
+		{
+			// Wait for other threads to complete their tasks (temporarily)
+			u32 max_run = group->max_run;
+
+			u32 prev_running = group->spurs_running.fetch_op([max_run](u32& x)
+			{
+				if (x >= max_run)
+				{
+					x--;
+					return true;
+				}
+
+				return false;
+			}).first;
+
+			if (prev_running == max_run && prev_running != group->max_num)
+			{
+				group->spurs_running.notify_one();
+
+				if (group->spurs_running == max_run - 1)
+				{
+					// Try to let another thread slip in and take over execution 
+					thread_ctrl::wait_for(300);
+
+					// Try to quit waiting
+					prev_running = group->spurs_running.fetch_op([max_run](u32& x)
+					{
+						if (x < max_run)
+						{
+							x++;
+							return true;
+						}
+
+						return false;
+					}).first;
+				}
+			}
+
+			if (prev_running >= max_run)
+			{
+				const u64 before = get_system_time();
+				u64 current = before;
+
+				lv2_obj::prepare_for_sleep(*this);
+
+				while (true)
+				{
+					if (is_stopped())
+					{
+						break;
+					}
+
+					thread_ctrl::wait_on(group->spurs_running, prev_running, 10000 - (current - before));
+
+					max_run = group->max_run;
+					
+					prev_running = group->spurs_running.fetch_op([max_run](u32& x)
+					{
+						if (x < max_run)
+						{
+							x++;
+							return true;
+						}
+
+						return false;
+					}).first;
+
+					if (prev_running < max_run)
+					{
+						break;
+					}
+
+					current = get_system_time();
+
+					if (current - before >= 10000u)
+					{
+						// Timed-out
+						break;
+					}
+				}
+
+				state += cpu_flag::temp;
+				static_cast<void>(test_stopped());
+			}
+		}
+
+
 		if (do_putllc(ch_mfc_cmd))
 		{
 			ch_atomic_stat.set_value(MFC_PUTLLC_SUCCESS);
+			spurs_waited = false;
 		}
 		else
 		{
@@ -5394,6 +5588,105 @@ s64 spu_thread::get_ch_value(u32 ch)
 			return events.events & mask1;
 		}
 
+		const bool is_spurs_task_wait = pc == 0x11a8 && spurs_addr == raddr && g_cfg.core.max_spurs_threads != g_cfg.core.max_spurs_threads.def && !spurs_waited;
+
+		const auto wait_spurs_task = [&]
+		{
+			if (is_spurs_task_wait)
+			{
+				// Wait for other threads to complete their tasks (temporarily)
+				if (!is_stopped())
+				{
+					u32 max_run = group->max_run;
+
+					u32 prev_running = group->spurs_running.fetch_op([max_run](u32& x)
+					{
+						if (x < max_run)
+						{
+							x++;
+							return true;
+						}
+
+						return false;
+					}).first;
+
+					if (prev_running >= max_run)
+					{
+						const u64 before = get_system_time();
+						u64 current = before;
+
+						lv2_obj::prepare_for_sleep(*this);
+
+						spurs_waited = true;
+
+						while (true)
+						{
+							if (is_stopped())
+							{
+								break;
+							}
+
+							thread_ctrl::wait_on(group->spurs_running, prev_running, 10000u - (current - before));
+
+							max_run = group->max_run;
+
+							prev_running = group->spurs_running.fetch_op([max_run](u32& x)
+							{
+								if (x < max_run)
+								{
+									x++;
+									return true;
+								}
+
+								return false;
+							}).first;
+
+							if (prev_running < max_run)
+							{
+								break;
+							}
+
+							current = get_system_time();
+
+							if (current - before >= 10000u)
+							{
+								// Timed-out
+								group->spurs_running++;
+								break;
+							}
+						}
+					}
+				}
+			}
+		};
+
+		if (is_spurs_task_wait)
+		{
+			const u32 prev_running = group->spurs_running.fetch_op([](u32& x)
+			{
+				if (x)
+				{
+					x--;
+					return true;
+				}
+
+				return false;
+			}).first;
+
+			if (prev_running == group->max_run && prev_running < group->max_num)
+			{
+				group->spurs_running.notify_one();
+
+				spurs_waited = true;
+
+				if (group->spurs_running == prev_running - 1)
+				{
+					// Try to let another thread slip in and take over execution 
+					thread_ctrl::wait_for(300);
+				}
+			}
+		}
+
 		spu_function_logger logger(*this, "MFC Events read");
 
 		lv2_obj::prepare_for_sleep(*this);
@@ -5406,7 +5699,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 		const u32 old_raddr = raddr;
 
 		// Does not need to safe-access reservation if LR is the only event masked
-		// Because it's either an access violation or a livelock if an invalid memory is passed
+		// Because it's either an access violation or a live-lock if an invalid memory is passed
 		if (raddr && mask1 > SPU_EVENT_LR)
 		{
 			auto area = vm::get(vm::any, raddr);
@@ -5420,7 +5713,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 			}
 			else if (area)
 			{
-				// Ensure possesion over reservation memory so it won't be deallocated
+				// Ensure possession over reservation memory so it won't be de-allocated
 				auto [base_addr, shm_] = area->peek(raddr);
 
 				if (shm_)
@@ -5467,13 +5760,14 @@ s64 spu_thread::get_ch_value(u32 ch)
 				}
 				else if (!cmp_rdata(rdata, *resrv_mem))
 				{
-					// Only data changed, try to notify waiters
-					if (get_resrv_waiters_count(raddr) && vm::reservation_acquire(raddr).compare_and_swap_test(rtime, rtime + 128))
+					// Notify threads manually, memory data has likely changed and broke the reservation for others
+					if (vm::reservation_notifier_count(raddr) && vm::reservation_acquire(raddr) == rtime)
 					{
-						vm::reservation_notifier(raddr).notify_all();
+						vm::reservation_notifier_notify(raddr);
 					}
 
 					set_lr = true;
+					spu_log.trace("SPU Reservation Wait: Did not encounter notification (raddr=0x%x)", raddr);
 				}
 
 				if (set_lr)
@@ -5486,6 +5780,24 @@ s64 spu_thread::get_ch_value(u32 ch)
 
 			if (raddr && (mask1 & ~SPU_EVENT_TM) == SPU_EVENT_LR)
 			{
+				if (u32 max_threads = std::min<u32>(g_cfg.core.max_spurs_threads, group ? group->max_num : u32{umax}); group && group->max_run != max_threads)
+				{
+					constexpr std::string_view spurs_suffix = "CellSpursKernelGroup"sv;
+
+					if (group->name.ends_with(spurs_suffix) && !group->name.substr(0, group->name.size() - spurs_suffix.size()).ends_with("_libsail"))
+					{
+						// Hack: don't run more SPURS threads than specified.
+						if (u32 old = atomic_storage<u32>::exchange(group->max_run, max_threads); old > max_threads)
+						{
+							spu_log.success("HACK: '%s' (0x%x) limited to %u threads.", group->name, group->id, max_threads);
+						}
+						else if (u32 running = group->spurs_running; old < max_threads && running >= old && running < max_threads)
+						{
+							group->spurs_running.notify_all();
+						}
+					}
+				}
+
 				// Don't busy-wait with TSX - memory is sensitive
 				if (g_use_rtm || !reservation_busy_waiting)
 				{
@@ -5506,33 +5818,32 @@ s64 spu_thread::get_ch_value(u32 ch)
 							}
 						}
 					}
-#ifdef __linux__
-					get_resrv_waiters_count(raddr)++;
-					vm::reservation_notifier(raddr).wait(rtime, atomic_wait_timeout{50'000});
-					get_resrv_waiters_count(raddr)--;
-#else
+
 					if (raddr - spurs_addr <= 0x80 && !g_cfg.core.spu_accurate_reservations && mask1 == SPU_EVENT_LR)
 					{
-						atomic_wait_engine::set_one_time_use_wait_callback(+[](u64) -> bool
-						{
-							const auto _this = static_cast<spu_thread*>(cpu_thread::get_current());
-							AUDIT(_this->get_class() == thread_class::spu);
-
-							return !_this->is_stopped();
-						});
-
-						// Wait without timeout, in this situation we have notifications for all writes making it possible
+						// Wait with extended timeout, in this situation we have notifications for nearly all writes making it possible
 						// Abort notifications are handled specially for performance reasons
-						vm::reservation_notifier(raddr).wait(rtime);
+						if (auto wait_var = vm::reservation_notifier_begin_wait(raddr, rtime))
+						{
+							utils::bless<atomic_t<u32>>(&wait_var->raw().wait_flag)->wait(1, atomic_wait_timeout{300'000});
+							vm::reservation_notifier_end_wait(*wait_var);
+						}
+
 						continue;
 					}
 
+					const u32 _raddr = this->raddr;
+#ifdef __linux__
+					if (auto wait_var = vm::reservation_notifier_begin_wait(_raddr, rtime))
+					{
+						utils::bless<atomic_t<u32>>(&wait_var->raw().wait_flag)->wait(1, atomic_wait_timeout{50'000});
+						vm::reservation_notifier_end_wait(*wait_var);
+					}
+#else
 					static thread_local bool s_tls_try_notify = false;
 					s_tls_try_notify = false;
 
-					const u32 _raddr = this->raddr;
-
-					atomic_wait_engine::set_one_time_use_wait_callback(mask1 != SPU_EVENT_LR ? nullptr : +[](u64 attempts) -> bool
+					const auto wait_cb = mask1 != SPU_EVENT_LR ? nullptr : +[](u64 attempts) -> bool
 					{
 						const auto _this = static_cast<spu_thread*>(cpu_thread::get_current());
 						AUDIT(_this->get_class() == thread_class::spu);
@@ -5564,8 +5875,8 @@ s64 spu_thread::get_ch_value(u32 ch)
 						}
 						else if (!cmp_rdata(_this->rdata, *_this->resrv_mem))
 						{
-							// Only data changed, try to notify waiters
-							if (get_resrv_waiters_count(raddr) >= 2 && vm::reservation_acquire(raddr).compare_and_swap_test(_this->rtime, _this->rtime + 128))
+							// Notify threads manually, memory data has likely changed and broke the reservation for others
+							if (vm::reservation_notifier_count(raddr) >= 2 && vm::reservation_acquire(raddr) == _this->rtime)
 							{
 								s_tls_try_notify = true;
 							}
@@ -5581,15 +5892,18 @@ s64 spu_thread::get_ch_value(u32 ch)
 						}
 
 						return true;
-					});
+					};
 
-					get_resrv_waiters_count(_raddr)++;
-					vm::reservation_notifier(_raddr).wait(rtime, atomic_wait_timeout{80'000});
-					get_resrv_waiters_count(_raddr)--;
-
-					if (s_tls_try_notify && get_resrv_waiters_count(_raddr) && vm::reservation_acquire(_raddr) == rtime + 128)
+					if (auto wait_var = vm::reservation_notifier_begin_wait(_raddr, rtime))
 					{
-						vm::reservation_notifier(_raddr).notify_all();
+						atomic_wait_engine::set_one_time_use_wait_callback(wait_cb);
+						utils::bless<atomic_t<u32>>(&wait_var->raw().wait_flag)->wait(1, atomic_wait_timeout{80'000});
+						vm::reservation_notifier_end_wait(*wait_var);
+					}
+
+					if (s_tls_try_notify && vm::reservation_notifier_count(_raddr) && vm::reservation_acquire(_raddr) == rtime)
+					{
+						vm::reservation_notifier_notify(_raddr);
 					}
 #endif
 				}
@@ -5604,6 +5918,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 			thread_ctrl::wait_on(state, old, 100);
 		}
 
+		wait_spurs_task();
 		wakeup_delay();
 
 		if (is_paused(state - cpu_flag::suspend))
@@ -6513,7 +6828,7 @@ bool spu_thread::stop_and_signal(u32 code)
 						if (prev_resv && prev_resv != resv)
 						{
 							// Batch reservation notifications if possible
-							vm::reservation_notifier(prev_resv).notify_all();
+							vm::reservation_notifier_notify(prev_resv);
 						}
 
 						prev_resv = resv;
@@ -6524,7 +6839,7 @@ bool spu_thread::stop_and_signal(u32 code)
 
 		if (prev_resv)
 		{
-			vm::reservation_notifier(prev_resv).notify_all();
+			vm::reservation_notifier_notify(prev_resv);
 		}
 
 		check_state();
@@ -6846,8 +7161,13 @@ s64 spu_channel::pop_wait(cpu_thread& spu, bool pop)
 			return false;
 		}
 
-		data = bit_wait;
-		jostling_value.release(bit_wait);
+		data = (pop ? bit_occupy : 0) | bit_wait;
+
+		if (pop)
+		{
+			jostling_value.release(bit_occupy);
+		}
+
 		return true;
 	}).first;
 
@@ -6862,29 +7182,39 @@ s64 spu_channel::pop_wait(cpu_thread& spu, bool pop)
 
 		if (!(data & bit_wait))
 		{
-			return static_cast<u32>(jostling_value);
+			return static_cast<u32>(pop ? jostling_value.exchange(0) : +data);
 		}
 	}
 
+	const u32 wait_on_val = static_cast<u32>(((pop ? bit_occupy : 0) | bit_wait) >> 32);
+
 	while (true)
 	{
-		thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&data)[1], u32{bit_wait >> 32});
+		thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&data)[1], wait_on_val);
 		old = data;
 
 		if (!(old & bit_wait))
 		{
-			return static_cast<u32>(jostling_value);
+			return static_cast<u32>(pop ? jostling_value.exchange(0) : +data);
 		}
 
 		if (spu.is_stopped())
 		{
 			// Abort waiting and test if a value has been received
-			if (u64 v = jostling_value.exchange(0); !(v & bit_wait))
+			if (pop)
 			{
-				return static_cast<u32>(v);
+				if (u64 v = jostling_value.exchange(0); !(v & bit_occupy))
+				{
+					return static_cast<u32>(v);
+				}
+
+				ensure(data.fetch_and(~(bit_wait | bit_occupy)) & bit_wait);
+			}
+			else
+			{
+				data.bit_test_reset(off_wait);
 			}
 
-			ensure(data.bit_test_reset(off_wait));
 			return -1;
 		}
 	}
@@ -6898,8 +7228,8 @@ bool spu_channel::push_wait(cpu_thread& spu, u32 value, bool push)
 	{
 		if (data & bit_count) [[unlikely]]
 		{
-			jostling_value.release(push ? value : static_cast<u32>(data));
-			data |= bit_wait;
+			jostling_value.release(push ? (bit_occupy | value) : static_cast<u32>(data));
+			data |= (push ? bit_occupy : 0) | bit_wait;
 		}
 		else if (push)
 		{
@@ -6919,11 +7249,6 @@ bool spu_channel::push_wait(cpu_thread& spu, u32 value, bool push)
 	{
 		if (!(state & bit_wait))
 		{
-			if (!push)
-			{
-				data &= ~bit_count;
-			}
-
 			return true;
 		}
 
@@ -6935,18 +7260,12 @@ bool spu_channel::push_wait(cpu_thread& spu, u32 value, bool push)
 	{
 		if (!(state & bit_wait))
 		{
-			if (!push)
-			{
-				data &= ~bit_count;
-			}
-
 			return true;
 		}
 
 		if (spu.is_stopped())
 		{
-			data &= ~bit_wait;
-			return false;
+			return !data.bit_test_reset(off_wait);
 		}
 
 		thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&data)[1], u32(state >> 32));
@@ -6954,12 +7273,17 @@ bool spu_channel::push_wait(cpu_thread& spu, u32 value, bool push)
 	}
 }
 
-std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu)
+std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu, bool pop_value)
 {
 	auto old = values.fetch_op([&](sync_var_t& data)
 	{
 		if (data.count != 0)
 		{
+			if (!pop_value)
+			{
+				return;
+			}
+
 			data.waiting = 0;
 			data.count--;
 
@@ -6969,8 +7293,8 @@ std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu)
 		}
 		else
 		{
-			data.waiting = 1;
-			jostling_value.release(bit_wait);
+			data.waiting = (pop_value ? bit_occupy : 0) | bit_wait;
+			jostling_value.release(pop_value ? jostling_flag : 0);
 		}
 	});
 
@@ -6979,7 +7303,7 @@ std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu)
 		return {old.count, old.value0};
 	}
 
-	old.waiting = 1;
+	old.waiting = (pop_value ? bit_occupy : 0) | bit_wait;
 
 	for (int i = 0; i < 10; i++)
 	{
@@ -6987,7 +7311,7 @@ std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu)
 
 		if (!atomic_storage<u8>::load(values.raw().waiting))
 		{
-			return {1, static_cast<u32>(jostling_value)};
+			return {1, static_cast<u32>(pop_value ? jostling_value.exchange(0) : 0)};
 		}
 	}
 
@@ -6996,23 +7320,88 @@ std::pair<u32, u32> spu_channel_4_t::pop_wait(cpu_thread& spu)
 		thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&values)[0], u32(u64(std::bit_cast<u128>(old))));
 		old = values;
 
-		if (!old.waiting)
+		if (~old.waiting & bit_wait)
 		{
 			// Count of 1 because a value has been inserted and popped in the same step.
-			return {1, static_cast<u32>(jostling_value)};
+			return {1, static_cast<u32>(pop_value ? jostling_value.exchange(0) : 0)};
 		}
 
 		if (spu.is_stopped())
 		{
-			// Abort waiting and test if a value has been received
-			if (u64 v = jostling_value.exchange(0); !(v & bit_wait))
+			if (pop_value)
 			{
-				return {1, static_cast<u32>(v)};
+				// Abort waiting and test if a value has been received
+				if (u64 v = jostling_value.exchange(0); !(v & jostling_flag))
+				{
+					return {1, static_cast<u32>(v)};
+				}
 			}
 
-			ensure(atomic_storage<u8>::exchange(values.raw().waiting, 0));
+			if (~atomic_storage<u8>::exchange(values.raw().waiting, 0) & bit_wait)
+			{
+				// Count of 1 because a value has been inserted and popped in the same step.
+				return {1, static_cast<u32>(pop_value ? jostling_value.exchange(0) : 0)};
+			}
+
 			return {};
 		}
+	}
+}
+
+spu_channel_op_state spu_channel_4_t::push(u32 value, bool postpone_notify)
+{
+	while (true)
+	{
+		value3.release(value);
+		const auto [old, pushed_to_data] = values.fetch_op([&](sync_var_t& data)
+		{
+			if (data.waiting & bit_occupy)
+			{
+				return false;
+			}
+
+			switch (data.count++)
+			{
+			case 0: data.value0 = value; break;
+			case 1: data.value1 = value; break;
+			case 2: data.value2 = value; break;
+			default:
+			{
+				data.count = 4;
+				data.value3_inval++; // Ensure the SPU reads the most recent value3 write in try_pop by re-loading
+				break;
+			}
+			}
+
+			return true;
+		});
+
+		if (!pushed_to_data)
+		{
+			// Insert the pending value in special storage for waiting SPUs, leave no time in which the channel has data
+			if (!jostling_value.compare_and_swap_test(jostling_flag, value))
+			{
+				// Other thread has inserted a value through jostling_value, retry
+				continue;
+			}
+		}
+
+		if (old.waiting & bit_wait)
+		{
+			// Turn off waiting bit manually (must succeed because waiting bit can only be resetted by the thread pushing to jostling_value)
+			if (~atomic_storage<u8>::exchange(values.raw().waiting, 0) & bit_wait)
+			{
+				// Could be fatal or at emulation stopping, to be checked by the caller
+				return { old.count, old.count, false, false };
+			}
+
+			if (!postpone_notify)
+			{
+				utils::bless<atomic_t<u32>>(&values)[0].notify_one();
+			}
+		}
+
+		return { old.count, std::min<u8>(static_cast<u8>(old.count + 1), 4), !!(old.waiting & bit_wait), true };
 	}
 }
 

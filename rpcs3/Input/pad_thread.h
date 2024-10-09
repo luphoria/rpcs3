@@ -34,6 +34,8 @@ public:
 
 	void open_home_menu();
 
+	std::map<pad_handler, std::shared_ptr<PadHandlerBase>>& get_handlers() { return m_handlers; }
+
 	static std::shared_ptr<PadHandlerBase> GetHandler(pad_handler type);
 	static void InitPadConfig(cfg_pad& cfg, pad_handler type, std::shared_ptr<PadHandlerBase>& handler);
 
@@ -74,6 +76,7 @@ namespace pad
 	extern atomic_t<bool> g_enabled;
 	extern atomic_t<bool> g_reset;
 	extern atomic_t<bool> g_started;
+	extern atomic_t<bool> g_home_menu_requested;
 
 	static inline class pad_thread* get_current_handler(bool relaxed = false)
 	{

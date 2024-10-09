@@ -184,6 +184,7 @@ static void ppu_initialize_modules(ppu_linkage_info* link, utils::serial* ar = n
 		&ppu_module_manager::cellAdec,
 		&ppu_module_manager::cellAtrac,
 		&ppu_module_manager::cellAtracMulti,
+		&ppu_module_manager::cellAtracXdec,
 		&ppu_module_manager::cellAudio,
 		&ppu_module_manager::cellAvconfExt,
 		&ppu_module_manager::cellAuthDialogUtility,
@@ -1128,6 +1129,7 @@ static void ppu_check_patch_spu_images(const ppu_module& mod, const ppu_segment&
 		{
 			bool next = true;
 			const u32 old_i = i;
+			u32 guid_start = umax, guid_end = umax;
 
 			for (u32 search = i & -128, tries = 10; tries && search >= prev_bound; tries--, search = utils::sub_saturate<u32>(search, 128))
 			{
@@ -1146,7 +1148,7 @@ static void ppu_check_patch_spu_images(const ppu_module& mod, const ppu_segment&
 					continue;
 				}
 
-				ppu_log.success("Found SPURS GUID Pattern at 0x%05x", search + seg.addr);
+				guid_start = search + seg.addr;
 				i = search;
 				next = false;
 				break;
@@ -1218,7 +1220,7 @@ static void ppu_check_patch_spu_images(const ppu_module& mod, const ppu_segment&
 						{
 							// SPURS GUID pattern
 							end = it;
-							ppu_log.success("Found SPURS GUID Pattern for terminator at 0x%05x", end + seg.addr);
+							guid_end = end + seg.addr;
 							break;
 						}
 
@@ -1252,7 +1254,7 @@ static void ppu_check_patch_spu_images(const ppu_module& mod, const ppu_segment&
 						end = begin + std::min<u32>(end - begin, SPU_LS_SIZE - guessed_ls_addr);
 					}
 
-					ppu_log.success("Found valid roaming SPU code at 0x%x..0x%x (guessed_ls_addr=0x%x)", seg.addr + begin, seg.addr + end, guessed_ls_addr);
+					ppu_log.success("Found valid roaming SPU code at 0x%x..0x%x (guessed_ls_addr=0x%x, GUID=0x%05x..0x%05x)", seg.addr + begin, seg.addr + end, guessed_ls_addr, guid_start, guid_end);
 
 					if (!is_firmware && _main == &mod)
 					{
@@ -1557,7 +1559,7 @@ std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, bool virtual_lo
 				_seg.size = mem_size;
 				_seg.filesz = file_size;
 
-				prx->addr_to_seg_index.emplace(addr, prx->segs.size() - 1);
+				prx->addr_to_seg_index.emplace(addr, ::size32(prx->segs) - 1);
 
 				// Copy segment data
 				if (!ar) std::memcpy(ensure(prx->get_ptr<void>(addr)), prog.bin.data(), file_size);
@@ -2129,7 +2131,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, bool virtual_load, const std::str
 
 			// Store only LOAD segments (TODO)
 			_main.segs.emplace_back(_seg);
-			_main.addr_to_seg_index.emplace(addr, _main.segs.size() - 1);
+			_main.addr_to_seg_index.emplace(addr, ::size32(_main.segs) - 1);
 
 			// Copy segment data, hash it
 			if (!already_loaded)
@@ -2825,7 +2827,7 @@ std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_ex
 
 			// Store only LOAD segments (TODO)
 			ovlm->segs.emplace_back(_seg);
-			ovlm->addr_to_seg_index.emplace(addr, ovlm->segs.size() - 1);
+			ovlm->addr_to_seg_index.emplace(addr, ::size32(ovlm->segs) - 1);
 
 			// Copy segment data, hash it
 			if (!already_loaded) std::memcpy(ensure(ovlm->get_ptr<void>(addr)), prog.bin.data(), prog.bin.size());

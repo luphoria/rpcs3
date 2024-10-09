@@ -132,7 +132,7 @@ target_sources(rpcs3_emu PRIVATE
 
 if(USE_FAUDIO)
     find_package(SDL2)
-    if(SDL2_FOUND AND NOT SDL2_VERSION VERSION_LESS 2.0.9)
+    if(SDL2_FOUND AND SDL2_VERSION VERSION_GREATER_EQUAL 2.0.9)
         target_sources(rpcs3_emu PRIVATE
             Audio/FAudio/FAudioBackend.cpp
             Audio/FAudio/faudio_enumerator.cpp
@@ -239,6 +239,7 @@ target_sources(rpcs3_emu PRIVATE
     Cell/Modules/cellAdec.cpp
     Cell/Modules/cellAtrac.cpp
     Cell/Modules/cellAtracMulti.cpp
+    Cell/Modules/cellAtracXdec.cpp
     Cell/Modules/cellAudio.cpp
     Cell/Modules/cellAudioOut.cpp
     Cell/Modules/cellAuthDialog.cpp
@@ -389,6 +390,15 @@ target_sources(rpcs3_emu PRIVATE
     CPU/CPUTranslator.cpp
 )
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|arm64|aarch64")
+    target_sources(rpcs3_emu PRIVATE
+        CPU/Backends/AArch64/AArch64ASM.cpp
+        CPU/Backends/AArch64/AArch64Common.cpp
+        CPU/Backends/AArch64/AArch64JIT.cpp
+        CPU/Backends/AArch64/AArch64Signal.cpp
+    )
+endif()
+
 target_link_libraries(rpcs3_emu
     PUBLIC 3rdparty::llvm 3rdparty::asmjit)
 
@@ -397,6 +407,7 @@ target_link_libraries(rpcs3_emu
 target_sources(rpcs3_emu PRIVATE
     Io/Buzz.cpp
     Io/camera_config.cpp
+    Io/Dimensions.cpp
     Io/GameTablet.cpp
     Io/GHLtar.cpp
     Io/GunCon3.cpp
@@ -416,6 +427,8 @@ target_sources(rpcs3_emu PRIVATE
     Io/RB3MidiKeyboard.cpp
     Io/recording_config.cpp
     Io/Skylander.cpp
+    Io/TopShotElite.cpp
+    Io/TopShotFearmaster.cpp
     Io/Turntable.cpp
     Io/usb_device.cpp
     Io/usb_vfs.cpp
@@ -430,8 +443,10 @@ target_link_libraries(rpcs3_emu PRIVATE
 target_sources(rpcs3_emu PRIVATE
     NP/fb_helpers.cpp
     NP/np_cache.cpp
+    NP/np_gui_cache.cpp
     NP/np_contexts.cpp
     NP/np_dnshook.cpp
+    NP/np_requests_gui.cpp
     NP/np_handler.cpp
     NP/np_helpers.cpp
     NP/np_notifications.cpp
@@ -440,6 +455,7 @@ target_sources(rpcs3_emu PRIVATE
     NP/np_structs_extra.cpp
     NP/rpcn_client.cpp
     NP/rpcn_config.cpp
+    NP/rpcn_countries.cpp
     NP/upnp_config.cpp
     NP/upnp_handler.cpp
 )
@@ -496,6 +512,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/NV47/HW/nv308a.cpp
     RSX/NV47/HW/nv406e.cpp
     RSX/NV47/HW/nv4097.cpp
+    RSX/Overlays/FriendsList/overlay_friends_list_dialog.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_components.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_main_menu.cpp
@@ -613,4 +630,8 @@ endif()
 
 if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(rpcs3_emu PRIVATE "${PROJECT_SOURCE_DIR}/rpcs3/stdafx.h")
+endif()
+
+if(WAYLAND_FOUND)
+    target_link_libraries(rpcs3_emu PRIVATE OpenGL::EGL)
 endif()

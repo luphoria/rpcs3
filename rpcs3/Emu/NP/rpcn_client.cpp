@@ -14,6 +14,7 @@
 #include "Emu/NP/np_helpers.h"
 #include "Emu/NP/vport0.h"
 #include "Emu/system_config.h"
+#include "Emu/RSX/Overlays/overlay_message.h"
 
 #include "util/asm.hpp"
 
@@ -74,6 +75,26 @@ namespace rpcn
 		}
 	}
 
+	void overlay_friend_callback(void* /*param*/, rpcn::NotificationType ntype, const std::string& username, bool status)
+	{
+		if (!g_cfg.misc.show_rpcn_popups)
+			return;
+
+		localized_string_id loc_id = localized_string_id::INVALID;
+
+		switch (ntype)
+		{
+		case rpcn::NotificationType::FriendQuery: loc_id = localized_string_id::RPCN_FRIEND_REQUEST_RECEIVED; break;
+		case rpcn::NotificationType::FriendNew: loc_id = localized_string_id::RPCN_FRIEND_ADDED; break;
+		case rpcn::NotificationType::FriendLost: loc_id = localized_string_id::RPCN_FRIEND_LOST; break;
+		case rpcn::NotificationType::FriendStatus: loc_id = status ? localized_string_id::RPCN_FRIEND_LOGGED_IN : localized_string_id::RPCN_FRIEND_LOGGED_OUT; break;
+		case rpcn::NotificationType::FriendPresenceChanged: return;
+		default: rpcn_log.fatal("An unhandled notification type was received by the overlay friend callback!"); break;
+		}
+
+		rsx::overlays::queue_message(get_localized_string(loc_id, username.c_str()), 3'000'000);
+	}
+
 	std::string rpcn_state_to_string(rpcn::rpcn_state state)
 	{
 		return get_localized_string(rpcn_state_to_localized_string_id(state));
@@ -84,7 +105,7 @@ namespace rpcn
 		rpcn_log.notice("online: %s, pr_com_id: %s, pr_title: %s, pr_status: %s, pr_comment: %s, pr_data: %s", online ? "true" : "false", pr_com_id.data, pr_title, pr_status, pr_comment, fmt::buf_to_hexstring(pr_data.data(), pr_data.size()));
 	}
 
-	constexpr u32 RPCN_PROTOCOL_VERSION = 24;
+	constexpr u32 RPCN_PROTOCOL_VERSION = 25;
 	constexpr usz RPCN_HEADER_SIZE      = 15;
 
 	bool is_error(ErrorType err)
@@ -179,7 +200,8 @@ namespace rpcn
 		sptr = instance.lock();
 		if (!sptr)
 		{
-			sptr     = std::shared_ptr<rpcn_client>(new rpcn_client());
+			sptr = std::shared_ptr<rpcn_client>(new rpcn_client());
+			sptr->register_friend_cb(overlay_friend_callback, nullptr);
 			instance = sptr;
 		}
 
@@ -1305,7 +1327,7 @@ namespace rpcn
 	bool rpcn_client::get_server_list(u32 req_id, const SceNpCommunicationId& communication_id, std::vector<u16>& server_list)
 	{
 		std::vector<u8> data(COMMUNICATION_ID_SIZE), reply_data;
-		memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(communication_id, data);
 
 		if (!forge_send_reply(CommandType::GetServerList, req_id, data, reply_data))
 		{
@@ -1368,7 +1390,7 @@ namespace rpcn
 	bool rpcn_client::get_world_list(u32 req_id, const SceNpCommunicationId& communication_id, u16 server_id)
 	{
 		std::vector<u8> data(COMMUNICATION_ID_SIZE + sizeof(u16));
-		memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(communication_id, data);
 		reinterpret_cast<le_t<u16>&>(data[COMMUNICATION_ID_SIZE]) = server_id;
 
 		return forge_send(CommandType::GetWorldList, req_id, data);
@@ -1795,7 +1817,7 @@ namespace rpcn
 	{
 		std::vector<u8> data(COMMUNICATION_ID_SIZE + sizeof(u64));
 
-		memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(communication_id, data);
 		write_to_ptr<le_t<u64>>(data, COMMUNICATION_ID_SIZE, room_id);
 
 		return forge_send(CommandType::PingRoomOwner, req_id, data);
@@ -1889,7 +1911,7 @@ namespace rpcn
 	bool rpcn_client::get_board_infos(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id)
 	{
 		std::vector<u8> data(COMMUNICATION_ID_SIZE + sizeof(u32));
-		memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(communication_id, data);
 		write_to_ptr<le_t<u32>>(data, COMMUNICATION_ID_SIZE, board_id);
 
 		return forge_send(CommandType::GetBoardInfos, req_id, data);
@@ -1951,7 +1973,7 @@ namespace rpcn
 		const usz bufsize = builder.GetSize();
 		std::vector<u8> data(COMMUNICATION_ID_SIZE + sizeof(u32) + bufsize + sizeof(u32) + score_data.size());
 
-		memcpy(data.data(), communication_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(communication_id, data);
 		reinterpret_cast<le_t<u32>&>(data[COMMUNICATION_ID_SIZE]) = static_cast<u32>(bufsize);
 		memcpy(data.data() + COMMUNICATION_ID_SIZE + sizeof(u32), buf, bufsize);
 		reinterpret_cast<le_t<u32>&>(data[COMMUNICATION_ID_SIZE + sizeof(u32) + bufsize]) = static_cast<u32>(score_data.size());
@@ -2192,15 +2214,286 @@ namespace rpcn
 		return forge_request_with_com_id(builder, pr_com_id, CommandType::SetPresence, rpcn_request_counter.fetch_add(1));
 	}
 
+	bool rpcn_client::createjoin_room_gui(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatchingAttr* attr_list)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+
+		u32 total_slots = 0;
+		u32 private_slots = 0;
+		bool privilege_grant = false;
+		bool stealth = false;
+
+		std::vector<flatbuffers::Offset<MatchingAttr>> vec_attrs;
+
+		for (const SceNpMatchingAttr* cur_attr = attr_list; cur_attr != nullptr; cur_attr = cur_attr->next ? cur_attr->next.get_ptr() : nullptr)
+		{
+			switch (cur_attr->type)
+			{
+			case SCE_NP_MATCHING_ATTR_TYPE_BASIC_NUM:
+			{
+				switch (cur_attr->id)
+				{
+				case SCE_NP_MATCHING_ROOM_ATTR_ID_TOTAL_SLOT:
+					total_slots = cur_attr->value.num;
+					break;
+				case SCE_NP_MATCHING_ROOM_ATTR_ID_PRIVATE_SLOT:
+					private_slots = cur_attr->value.num;
+					break;
+				case SCE_NP_MATCHING_ROOM_ATTR_ID_PRIVILEGE_TYPE:
+					ensure(cur_attr->value.num == SCE_NP_MATCHING_ROOM_PRIVILEGE_TYPE_NO_AUTO_GRANT || cur_attr->value.num == SCE_NP_MATCHING_ROOM_PRIVILEGE_TYPE_AUTO_GRANT, "Invalid SCE_NP_MATCHING_ROOM_ATTR_ID_PRIVILEGE_TYPE value");
+					privilege_grant = (cur_attr->value.num == SCE_NP_MATCHING_ROOM_PRIVILEGE_TYPE_AUTO_GRANT);
+					break;
+				case SCE_NP_MATCHING_ROOM_ATTR_ID_ROOM_SEARCH_FLAG:
+					ensure(cur_attr->value.num == SCE_NP_MATCHING_ROOM_SEARCH_FLAG_OPEN || cur_attr->value.num == SCE_NP_MATCHING_ROOM_SEARCH_FLAG_STEALTH, "Invalid SCE_NP_MATCHING_ROOM_ATTR_ID_ROOM_SEARCH_FLAG value");
+					stealth = (cur_attr->value.num == SCE_NP_MATCHING_ROOM_SEARCH_FLAG_STEALTH);
+					break;
+				default:
+					fmt::throw_exception("Invalid basic num attribute id");
+					break;
+				}
+
+				break;
+			}
+			case SCE_NP_MATCHING_ATTR_TYPE_GAME_BIN:
+			{
+				ensure(cur_attr->id >= 1u && cur_attr->id <= 16u, "Invalid game bin attribute id");
+				ensure(cur_attr->value.data.size <= 64u || ((cur_attr->id == 1u || cur_attr->id == 2u) && cur_attr->value.data.size <= 256u), "Invalid game bin size");
+
+				const std::vector<u8> vec_data(static_cast<const u8*>(cur_attr->value.data.ptr.get_ptr()), static_cast<const u8*>(cur_attr->value.data.ptr.get_ptr()) + cur_attr->value.data.size);
+				auto attr = CreateMatchingAttrDirect(builder, cur_attr->type, cur_attr->id, 0, &vec_data);
+				vec_attrs.push_back(attr);
+				break;
+			}
+			case SCE_NP_MATCHING_ATTR_TYPE_GAME_NUM:
+			{
+				ensure(cur_attr->id >= 1u && cur_attr->id <= 16u, "Invalid game num attribute id");
+
+				auto attr = CreateMatchingAttrDirect(builder, cur_attr->type, cur_attr->id, cur_attr->value.num, nullptr);
+				vec_attrs.push_back(attr);
+				break;
+			}
+			default:
+				fmt::throw_exception("Invalid attribute type");
+			}
+		}
+
+		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<MatchingAttr>>> final_attrs_vec;
+
+		if (!vec_attrs.empty())
+		{
+			final_attrs_vec = builder.CreateVector(vec_attrs);
+		}
+
+		auto req_finished = CreateCreateRoomGUIRequest(builder, total_slots, private_slots, privilege_grant, stealth, final_attrs_vec);
+		builder.Finish(req_finished);
+
+		return forge_request_with_com_id(builder, communication_id, CommandType::CreateRoomGUI, req_id);
+	}
+
+	bool rpcn_client::join_room_gui(u32 req_id, const SceNpRoomId& room_id)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		auto req_finished = CreateMatchingGuiRoomIdDirect(builder, &vec_room_id);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::JoinRoomGUI, req_id);
+	}
+
+	bool rpcn_client::leave_room_gui(u32 req_id, const SceNpRoomId& room_id)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		auto req_finished = CreateMatchingGuiRoomIdDirect(builder, &vec_room_id);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::LeaveRoomGUI, req_id);
+	}
+
+	bool rpcn_client::get_room_list_gui(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatchingReqRange* range, vm::ptr<SceNpMatchingSearchCondition> cond, vm::ptr<SceNpMatchingAttr> attr)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+
+		const s32 range_start = range->start;
+		const u32 range_max = range->max;
+
+		std::vector<flatbuffers::Offset<MatchingSearchCondition>> vec_conds;
+		std::vector<flatbuffers::Offset<MatchingAttr>> vec_attrs;
+
+		for (auto cur_cond = cond; cur_cond; cur_cond = cur_cond->next)
+		{
+			auto fb_cond = CreateMatchingSearchCondition(builder, cur_cond->target_attr_type, cur_cond->target_attr_id, cur_cond->comp_op, cur_cond->compared.value.num);
+			vec_conds.push_back(fb_cond);
+		}
+
+		for (auto cur_attr = attr; cur_attr; cur_attr = cur_attr->next)
+		{
+			auto fb_attr = CreateMatchingAttr(builder, cur_attr->type, cur_attr->id);
+			vec_attrs.push_back(fb_attr);
+		}
+
+		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<MatchingSearchCondition>>> final_conds_vec;
+		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<MatchingAttr>>> final_attrs_vec;
+
+		if (!vec_conds.empty())
+		{
+			final_conds_vec = builder.CreateVector(vec_conds);
+		}
+
+		if (!vec_attrs.empty())
+		{
+			final_attrs_vec = builder.CreateVector(vec_attrs);
+		}
+
+		auto req_finished = CreateGetRoomListGUIRequest(builder, range_start, range_max, final_conds_vec, final_attrs_vec);
+		builder.Finish(req_finished);
+
+		return forge_request_with_com_id(builder, communication_id, CommandType::GetRoomListGUI, req_id);
+	}
+
+	bool rpcn_client::set_room_search_flag_gui(u32 req_id, const SceNpRoomId& room_id, bool stealth)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		auto req_finished = CreateSetRoomSearchFlagGUIDirect(builder, &vec_room_id, stealth);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::SetRoomSearchFlagGUI, req_id);
+	}
+
+	bool rpcn_client::get_room_search_flag_gui(u32 req_id, const SceNpRoomId& room_id)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		auto req_finished = CreateMatchingGuiRoomIdDirect(builder, &vec_room_id);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::GetRoomSearchFlagGUI, req_id);
+	}
+
+	bool rpcn_client::set_room_info_gui(u32 req_id, const SceNpRoomId& room_id, vm::ptr<SceNpMatchingAttr> attrs)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		std::vector<flatbuffers::Offset<MatchingAttr>> vec_attrs;
+
+		for (auto cur_attr = attrs; cur_attr; cur_attr = cur_attr->next)
+		{
+			u32 num = 0;
+			flatbuffers::Offset<flatbuffers::Vector<uint8_t>> fb_vec_data = 0;
+
+			switch (cur_attr->type)
+			{
+			case SCE_NP_MATCHING_ATTR_TYPE_GAME_BIN:
+			{
+				const std::vector<u8> vec_data(static_cast<const u8*>(cur_attr->value.data.ptr.get_ptr()), static_cast<const u8*>(cur_attr->value.data.ptr.get_ptr()) + cur_attr->value.data.size);
+				fb_vec_data = builder.CreateVector(vec_data);
+				break;
+			}
+			case SCE_NP_MATCHING_ATTR_TYPE_GAME_NUM:
+			{
+				num = cur_attr->value.num;
+				break;
+			}
+			default:
+			{
+				fmt::throw_exception("Invalid attr type reached set_room_info_gui");
+				break;
+			}
+			}
+
+			auto fb_attr = CreateMatchingAttr(builder, cur_attr->type, cur_attr->id, num, fb_vec_data);
+			vec_attrs.push_back(fb_attr);
+		}
+
+		auto req_finished = CreateMatchingRoomDirect(builder, &vec_room_id, &vec_attrs);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::SetRoomInfoGUI, req_id);
+	}
+
+	bool rpcn_client::get_room_info_gui(u32 req_id, const SceNpRoomId& room_id, vm::ptr<SceNpMatchingAttr> attrs)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		const std::vector<u8> vec_room_id(room_id.opt, room_id.opt + sizeof(room_id.opt));
+		std::vector<flatbuffers::Offset<MatchingAttr>> vec_attrs;
+
+		for (auto cur_attr = attrs; cur_attr; cur_attr = cur_attr->next)
+		{
+			auto fb_attr = CreateMatchingAttr(builder, cur_attr->type, cur_attr->id);
+			vec_attrs.push_back(fb_attr);
+		}
+
+		auto req_finished = CreateMatchingRoomDirect(builder, &vec_room_id, &vec_attrs);
+		builder.Finish(req_finished);
+		return forge_request_with_data(builder, CommandType::GetRoomInfoGUI, req_id);
+	}
+
+	bool rpcn_client::quickmatch_gui(u32 req_id, const SceNpCommunicationId& com_id, vm::cptr<SceNpMatchingSearchCondition> cond, s32 available_num)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+		std::vector<flatbuffers::Offset<MatchingSearchCondition>> vec_conds;
+
+		for (auto cur_cond = cond; cur_cond; cur_cond = cur_cond->next)
+		{
+			auto fb_cond = CreateMatchingSearchCondition(builder, cur_cond->target_attr_type, cur_cond->target_attr_id, cur_cond->comp_op, cur_cond->compared.value.num);
+			vec_conds.push_back(fb_cond);
+		}
+
+		auto req_finished = CreateQuickMatchGUIRequestDirect(builder, &vec_conds, available_num);
+		builder.Finish(req_finished);
+		return forge_request_with_com_id(builder, com_id, CommandType::QuickMatchGUI, req_id);
+	}
+
+	bool rpcn_client::searchjoin_gui(u32 req_id, const SceNpCommunicationId& com_id, vm::cptr<SceNpMatchingSearchCondition> cond, vm::cptr<SceNpMatchingAttr> attr)
+	{
+		flatbuffers::FlatBufferBuilder builder(1024);
+
+		std::vector<flatbuffers::Offset<MatchingSearchCondition>> vec_conds;
+		std::vector<flatbuffers::Offset<MatchingAttr>> vec_attrs;
+
+		for (auto cur_cond = cond; cur_cond; cur_cond = cur_cond->next)
+		{
+			auto fb_cond = CreateMatchingSearchCondition(builder, cur_cond->target_attr_type, cur_cond->target_attr_id, cur_cond->comp_op, cur_cond->compared.value.num);
+			vec_conds.push_back(fb_cond);
+		}
+
+		for (auto cur_attr = attr; cur_attr; cur_attr = cur_attr->next)
+		{
+			auto fb_attr = CreateMatchingAttr(builder, cur_attr->type, cur_attr->id);
+			vec_attrs.push_back(fb_attr);
+		}
+
+		auto req_finished = CreateSearchJoinRoomGUIRequestDirect(builder, vec_conds.empty() ? nullptr : &vec_conds, vec_attrs.empty() ? nullptr : &vec_attrs);
+		builder.Finish(req_finished);
+		return forge_request_with_com_id(builder, com_id, CommandType::SearchJoinRoomGUI, req_id);
+	}
+
+	void rpcn_client::write_communication_id(const SceNpCommunicationId& com_id, std::vector<u8>& data)
+	{
+		ensure(com_id.data[9] == 0 && com_id.num <= 99, "rpcn_client::write_communication_id: Invalid SceNpCommunicationId");
+		const std::string com_id_str = np::communication_id_to_string(com_id);
+		ensure(com_id_str.size() == 12, "rpcn_client::write_communication_id: Error formatting SceNpCommunicationId");
+		memcpy(data.data(), com_id_str.data(), COMMUNICATION_ID_SIZE);
+	}
+
 	bool rpcn_client::forge_request_with_com_id(const flatbuffers::FlatBufferBuilder& builder, const SceNpCommunicationId& com_id, CommandType command, u64 packet_id)
 	{
 		const u8* buf     = builder.GetBufferPointer();
 		const usz bufsize = builder.GetSize();
 		std::vector<u8> data(COMMUNICATION_ID_SIZE + sizeof(u32) + bufsize);
 
-		memcpy(data.data(), com_id.data, COMMUNICATION_ID_SIZE);
+		rpcn_client::write_communication_id(com_id, data);
+
 		reinterpret_cast<le_t<u32>&>(data[COMMUNICATION_ID_SIZE]) = static_cast<u32>(bufsize);
 		memcpy(data.data() + COMMUNICATION_ID_SIZE + sizeof(u32), buf, bufsize);
+
+		return forge_send(command, packet_id, data);
+	}
+
+	bool rpcn_client::forge_request_with_data(const flatbuffers::FlatBufferBuilder& builder, CommandType command, u64 packet_id)
+	{
+		const u8* buf = builder.GetBufferPointer();
+		const usz bufsize = builder.GetSize();
+		std::vector<u8> data(sizeof(u32) + bufsize);
+
+		reinterpret_cast<le_t<u32>&>(data[0]) = static_cast<u32>(bufsize);
+		memcpy(data.data() + sizeof(u32), buf, bufsize);
 
 		return forge_send(command, packet_id, data);
 	}
@@ -2280,11 +2573,23 @@ namespace rpcn
 		return state;
 	}
 
+	void rpcn_client::get_friends(friend_data& friend_infos)
+	{
+		std::lock_guard lock(mutex_friends);
+		friend_infos = this->friend_infos;
+	}
+
 	void rpcn_client::get_friends_and_register_cb(friend_data& friend_infos, friend_cb_func cb_func, void* cb_param)
 	{
 		std::lock_guard lock(mutex_friends);
 
 		friend_infos = this->friend_infos;
+		friend_cbs.insert(std::make_pair(cb_func, cb_param));
+	}
+
+	void rpcn_client::register_friend_cb(friend_cb_func cb_func, void* cb_param)
+	{
+		std::lock_guard lock(mutex_friends);
 		friend_cbs.insert(std::make_pair(cb_func, cb_param));
 	}
 
@@ -2321,7 +2626,7 @@ namespace rpcn
 		{
 		case NotificationType::FriendQuery: // Other user sent a friend request
 		{
-			std::string username = vdata.get_string(false);
+			const std::string username = vdata.get_string(false);
 			if (vdata.is_error())
 			{
 				rpcn_log.error("Error parsing FriendQuery notification");
@@ -2334,8 +2639,8 @@ namespace rpcn
 		}
 		case NotificationType::FriendNew: // Add a friend to the friendlist(either accepted a friend request or friend accepted it)
 		{
-			bool online = !!vdata.get<u8>();
-			std::string username = vdata.get_string(false);
+			const bool online = !!vdata.get<u8>();
+			const std::string username = vdata.get_string(false);
 			if (vdata.is_error())
 			{
 				rpcn_log.error("Error parsing FriendNew notification");
@@ -2351,22 +2656,24 @@ namespace rpcn
 		}
 		case NotificationType::FriendLost: // Remove friend from the friendlist(user removed friend or friend removed friend)
 		{
-			std::string username = vdata.get_string(false);
+			const std::string username = vdata.get_string(false);
 			if (vdata.is_error())
 			{
 				rpcn_log.error("Error parsing FriendLost notification");
 				break;
 			}
 
+			friend_infos.requests_received.erase(username);
+			friend_infos.requests_sent.erase(username);
 			friend_infos.friends.erase(username);
 			call_callbacks(ntype, username, false);
 			break;
 		}
 		case NotificationType::FriendStatus: // Set status of friend to Offline or Online
 		{
-			bool online = !!vdata.get<u8>();
-			u64 timestamp        = vdata.get<u64>();
-			std::string username = vdata.get_string(false);
+			const bool online = !!vdata.get<u8>();
+			const u64 timestamp        = vdata.get<u64>();
+			const std::string username = vdata.get_string(false);
 			if (vdata.is_error())
 			{
 				rpcn_log.error("Error parsing FriendStatus notification");
@@ -2394,7 +2701,7 @@ namespace rpcn
 		}
 		case NotificationType::FriendPresenceChanged:
 		{
-			std::string npid = vdata.get_string(true);
+			const std::string username = vdata.get_string(true);
 			SceNpCommunicationId pr_com_id = vdata.get_com_id();
 			std::string pr_title = fmt::truncate(vdata.get_string(true), SCE_NP_BASIC_PRESENCE_TITLE_SIZE_MAX - 1);
 			std::string pr_status = fmt::truncate(vdata.get_string(true), SCE_NP_BASIC_PRESENCE_EXTENDED_STATUS_SIZE_MAX - 1);
@@ -2411,7 +2718,7 @@ namespace rpcn
 				break;
 			}
 
-			if (auto u = friend_infos.friends.find(npid); u != friend_infos.friends.end())
+			if (auto u = friend_infos.friends.find(username); u != friend_infos.friends.end())
 			{
 				u->second.pr_com_id = std::move(pr_com_id);
 				u->second.pr_title = std::move(pr_title);
@@ -2420,9 +2727,10 @@ namespace rpcn
 				u->second.pr_data = std::move(pr_data);
 
 				std::lock_guard lock(mutex_presence_updates);
-				presence_updates.insert_or_assign(std::move(npid), u->second);
+				presence_updates.insert_or_assign(username, u->second);
 			}
 
+			call_callbacks(ntype, username, false);
 			break;
 		}
 		default:

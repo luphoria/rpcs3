@@ -84,14 +84,14 @@ public:
 
 	void init_config(cfg_pad* cfg) override;
 	std::vector<pad_list_entry> list_devices() override;
-	connection get_next_button_press(const std::string& /*padId*/, const pad_callback& /*callback*/, const pad_fail_callback& /*fail_callback*/, bool /*get_blacklist*/ = false, const std::vector<std::string>& /*buttons*/ = {}) override { return connection::connected; }
-	bool bindPadToDevice(std::shared_ptr<Pad> pad, u8 player_id) override;
+	connection get_next_button_press(const std::string& /*padId*/, const pad_callback& /*callback*/, const pad_fail_callback& /*fail_callback*/, gui_call_type /*call_type*/, const std::vector<std::string>& /*buttons*/) override { return connection::connected; }
+	bool bindPadToDevice(std::shared_ptr<Pad> pad) override;
 	void process() override;
 
 	static std::string GetMouseName(const QMouseEvent* event);
 	static std::string GetMouseName(u32 button);
 	static QStringList GetKeyNames(const QKeyEvent* keyEvent);
-	static std::string GetKeyName(const QKeyEvent* keyEvent);
+	static std::string GetKeyName(const QKeyEvent* keyEvent, bool with_modifiers);
 	static std::string GetKeyName(const u32& keyCode);
 	static std::set<u32> GetKeyCodes(const cfg::string& cfg_string);
 	static u32 GetKeyCode(const QString& keyName);
@@ -105,6 +105,7 @@ protected:
 private:
 	QWindow* m_target = nullptr;
 	mouse_movement_mode m_mouse_movement_mode = mouse_movement_mode::relative;
+	bool m_keys_released = false;
 	bool m_mouse_move_used = false;
 	bool m_mouse_wheel_used = false;
 	bool get_mouse_lock_state() const;
@@ -116,6 +117,7 @@ private:
 	steady_clock::time_point m_button_time;
 	f32 m_analog_lerp_factor  = 1.0f;
 	f32 m_trigger_lerp_factor = 1.0f;
+	bool m_analog_limiter_toggle_mode = false;
 	bool m_pressure_intensity_toggle_mode = false;
 	u32 m_pressure_intensity_deadzone = 0;
 

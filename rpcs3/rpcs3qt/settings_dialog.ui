@@ -3,7 +3,7 @@
  <class>settings_dialog</class>
  <widget class="QDialog" name="settings_dialog">
   <property name="windowModality">
-   <enum>Qt::WindowModal</enum>
+   <enum>Qt::WindowModality::WindowModal</enum>
   </property>
   <property name="geometry">
    <rect>
@@ -30,7 +30,7 @@
    <item>
     <widget class="QScrollArea" name="scrollArea">
      <property name="frameShape">
-      <enum>QFrame::NoFrame</enum>
+      <enum>QFrame::Shape::NoFrame</enum>
      </property>
      <property name="widgetResizable">
       <bool>true</bool>
@@ -128,10 +128,10 @@
             <item>
              <spacer name="coreTabLeftLayoutSpacer">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -200,7 +200,7 @@
                   </sizepolicy>
                  </property>
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -212,7 +212,7 @@
                     <string>0</string>
                    </property>
                    <property name="alignment">
-                    <set>Qt::AlignCenter</set>
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
                    </property>
                   </widget>
                  </item>
@@ -231,10 +231,10 @@
             <item>
              <spacer name="coreTabMiddleLayoutSpacer">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -323,10 +323,10 @@
             <item>
              <spacer name="coreTabRightLayoutSpacer">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -343,10 +343,10 @@
         <item>
          <spacer name="coreTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -371,10 +371,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -560,10 +560,10 @@
             <item>
              <spacer name="gpu_tab_layout_right_spacer">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -624,17 +624,17 @@
                     <item>
                      <widget class="QLabel" name="resolutionScaleMin">
                       <property name="text">
-                       <string>50</string>
+                       <string>25</string>
                       </property>
                       <property name="alignment">
-                       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QSlider" name="resolutionScale">
                       <property name="orientation">
-                       <enum>Qt::Horizontal</enum>
+                       <enum>Qt::Orientation::Horizontal</enum>
                       </property>
                      </widget>
                     </item>
@@ -656,7 +656,7 @@
                       <string>0</string>
                      </property>
                      <property name="alignment">
-                      <set>Qt::AlignCenter</set>
+                      <set>Qt::AlignmentFlag::AlignCenter</set>
                      </property>
                     </widget>
                    </item>
@@ -689,14 +689,14 @@
                       <string>1</string>
                      </property>
                      <property name="alignment">
-                      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                      <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                      </property>
                     </widget>
                    </item>
                    <item>
                     <widget class="QSlider" name="minimumScalableDimension">
                      <property name="orientation">
-                      <enum>Qt::Horizontal</enum>
+                      <enum>Qt::Orientation::Horizontal</enum>
                      </property>
                     </widget>
                    </item>
@@ -717,7 +717,7 @@
                       <string>1x1</string>
                      </property>
                      <property name="alignment">
-                      <set>Qt::AlignCenter</set>
+                      <set>Qt::AlignmentFlag::AlignCenter</set>
                      </property>
                     </widget>
                    </item>
@@ -747,7 +747,7 @@
                <item>
                 <widget class="Line" name="line">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -778,7 +778,7 @@
                      <string>RCAS Sharpening Strength</string>
                     </property>
                     <property name="alignment">
-                     <set>Qt::AlignBottom|Qt::AlignLeading|Qt::AlignLeft</set>
+                     <set>Qt::AlignmentFlag::AlignBottom|Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft</set>
                     </property>
                     <property name="margin">
                      <number>1</number>
@@ -797,7 +797,7 @@
                     <item>
                      <widget class="QSlider" name="fsrSharpeningStrength">
                       <property name="orientation">
-                       <enum>Qt::Horizontal</enum>
+                       <enum>Qt::Orientation::Horizontal</enum>
                       </property>
                      </widget>
                     </item>
@@ -824,7 +824,7 @@
                        <string>0</string>
                       </property>
                       <property name="alignment">
-                       <set>Qt::AlignCenter</set>
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
                       </property>
                      </widget>
                     </item>
@@ -846,10 +846,10 @@
             <item>
              <spacer name="gpu_tab_layout_middle_spacer">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -930,7 +930,7 @@
                <string>Additional Settings</string>
               </property>
               <property name="alignment">
-               <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+               <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignVCenter</set>
               </property>
               <layout class="QVBoxLayout" name="gb_additional_settings_layout">
                <item>
@@ -978,10 +978,10 @@
                <item>
                 <spacer name="additional_settings_spacer">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -1001,10 +1001,10 @@
         <item>
          <spacer name="gpuTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -1029,10 +1029,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -1083,7 +1083,7 @@
                   </sizepolicy>
                  </property>
                  <property name="selectionMode">
-                  <enum>QAbstractItemView::ExtendedSelection</enum>
+                  <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
                  </property>
                 </widget>
                </item>
@@ -1113,10 +1113,10 @@
                <item>
                 <spacer name="spacer_audio_settings">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -1132,10 +1132,10 @@
             <item>
              <spacer name="verticalSpacerAudioLeft">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -1240,10 +1240,10 @@
                   <item>
                    <widget class="QSlider" name="masterVolume">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                     <property name="tickPosition">
-                     <enum>QSlider::TicksBelow</enum>
+                     <enum>QSlider::TickPosition::TicksBelow</enum>
                     </property>
                     <property name="tickInterval">
                      <number>50</number>
@@ -1256,10 +1256,10 @@
                <item>
                 <spacer name="spacer_audio_volume">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -1314,10 +1314,10 @@
                   <item>
                    <widget class="QSlider" name="audioBufferDuration">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                     <property name="tickPosition">
-                     <enum>QSlider::TicksBelow</enum>
+                     <enum>QSlider::TickPosition::TicksBelow</enum>
                     </property>
                     <property name="tickInterval">
                      <number>10</number>
@@ -1359,10 +1359,10 @@
                   <item>
                    <widget class="QSlider" name="timeStretchingThreshold">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                     <property name="tickPosition">
-                     <enum>QSlider::TicksBelow</enum>
+                     <enum>QSlider::TickPosition::TicksBelow</enum>
                     </property>
                     <property name="tickInterval">
                      <number>10</number>
@@ -1375,10 +1375,10 @@
                <item>
                 <spacer name="verticalSpacerAudioRight">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -1416,10 +1416,10 @@
              <item>
               <spacer name="microphoneSpacer">
                <property name="orientation">
-                <enum>Qt::Horizontal</enum>
+                <enum>Qt::Orientation::Horizontal</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -1549,10 +1549,10 @@
         <item>
          <spacer name="audioTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -1577,10 +1577,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -1731,18 +1731,6 @@
             </layout>
            </widget>
           </item>
-          <item row="4" column="1">
-           <widget class="QGroupBox" name="gametablet_emulated">
-            <property name="title">
-             <string>GameTablet</string>
-            </property>
-            <layout class="QVBoxLayout" name="gametablet_emulated_layout">
-             <item>
-              <widget class="QComboBox" name="gameTabletBox"/>
-             </item>
-            </layout>
-           </widget>
-          </item>
           <item row="3" column="2">
            <widget class="QGroupBox" name="gb_midi_1">
             <property name="title">
@@ -1844,10 +1832,10 @@
              <item>
               <spacer name="verticalSpacerIoAdditionalSettings">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -1865,10 +1853,10 @@
         <item>
          <spacer name="inputTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -1893,10 +1881,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -1988,7 +1976,7 @@
                   </sizepolicy>
                  </property>
                  <property name="layoutDirection">
-                  <enum>Qt::LeftToRight</enum>
+                  <enum>Qt::LayoutDirection::LeftToRight</enum>
                  </property>
                  <property name="wrapping">
                   <bool>false</bool>
@@ -1997,13 +1985,13 @@
                   <bool>true</bool>
                  </property>
                  <property name="alignment">
-                  <set>Qt::AlignCenter</set>
+                  <set>Qt::AlignmentFlag::AlignCenter</set>
                  </property>
                  <property name="readOnly">
                   <bool>false</bool>
                  </property>
                  <property name="buttonSymbols">
-                  <enum>QAbstractSpinBox::UpDownArrows</enum>
+                  <enum>QAbstractSpinBox::ButtonSymbols::UpDownArrows</enum>
                  </property>
                  <property name="accelerated">
                   <bool>true</bool>
@@ -2094,10 +2082,10 @@
                 <number>512</number>
                </property>
                <property name="orientation">
-                <enum>Qt::Horizontal</enum>
+                <enum>Qt::Orientation::Horizontal</enum>
                </property>
                <property name="tickPosition">
-                <enum>QSlider::TicksBelow</enum>
+                <enum>QSlider::TickPosition::TicksBelow</enum>
                </property>
                <property name="tickInterval">
                 <number>1024</number>
@@ -2118,10 +2106,10 @@
         <item>
          <spacer name="systemTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -2146,10 +2134,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -2253,10 +2241,10 @@
              <item>
               <spacer name="networkTabSpacerLeft">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -2288,12 +2276,24 @@
               </widget>
              </item>
              <item>
+              <widget class="QGroupBox" name="gb_psnCountryBox">
+               <property name="title">
+                <string>Country</string>
+               </property>
+               <layout class="QVBoxLayout" name="gb_psnCountryBox_layout">
+                <item>
+                 <widget class="QComboBox" name="psnCountryBox"/>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
               <spacer name="networkTabSpacerRight">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -2311,10 +2311,10 @@
         <item>
          <spacer name="networkTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -2339,10 +2339,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -2513,7 +2513,7 @@
                <item>
                 <widget class="QSlider" name="clockScale">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -2525,7 +2525,7 @@
                     <string>100%</string>
                    </property>
                    <property name="alignment">
-                    <set>Qt::AlignCenter</set>
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
                    </property>
                   </widget>
                  </item>
@@ -2544,10 +2544,10 @@
             <item>
              <spacer name="advancedTabSpacerLeft">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -2576,7 +2576,7 @@
                   </sizepolicy>
                  </property>
                  <property name="selectionMode">
-                  <enum>QAbstractItemView::ExtendedSelection</enum>
+                  <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
                  </property>
                 </widget>
                </item>
@@ -2589,7 +2589,7 @@
                   </sizepolicy>
                  </property>
                  <property name="selectionMode">
-                  <enum>QAbstractItemView::ExtendedSelection</enum>
+                  <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
                  </property>
                 </widget>
                </item>
@@ -2599,7 +2599,7 @@
                   <number>6</number>
                  </property>
                  <property name="sizeConstraint">
-                  <enum>QLayout::SetNoConstraint</enum>
+                  <enum>QLayout::SizeConstraint::SetNoConstraint</enum>
                  </property>
                  <item>
                   <widget class="QLineEdit" name="searchBox"/>
@@ -2767,7 +2767,7 @@
                <item>
                 <widget class="QSlider" name="wakeupDelay">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -2779,7 +2779,7 @@
                     <string>1 µs</string>
                    </property>
                    <property name="alignment">
-                    <set>Qt::AlignCenter</set>
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
                    </property>
                   </widget>
                  </item>
@@ -2810,7 +2810,7 @@
                <item>
                 <widget class="QSlider" name="vblank">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -2822,7 +2822,7 @@
                     <string>60 Hz</string>
                    </property>
                    <property name="alignment">
-                    <set>Qt::AlignCenter</set>
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
                    </property>
                   </widget>
                  </item>
@@ -2848,10 +2848,10 @@
             <item>
              <spacer name="advancedTabSpacerRight">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -2868,7 +2868,7 @@
         <item>
          <spacer name="advancedTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -2893,10 +2893,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -2966,6 +2966,13 @@
                 </widget>
                </item>
                <item>
+                <widget class="QCheckBox" name="showRpcnPopups">
+                 <property name="text">
+                  <string>Show RPCN popups</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
                 <widget class="QCheckBox" name="showPPUCompilationHint">
                  <property name="text">
                   <string>Show PPU compilation hint</string>
@@ -2976,6 +2983,27 @@
                 <widget class="QCheckBox" name="showShaderCompilationHint">
                  <property name="text">
                   <string>Show shader compilation hint</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="showAnalogLimiterToggleHint">
+                 <property name="text">
+                  <string>Show analog limiter toggle hint</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="showPressureIntensityToggleHint">
+                 <property name="text">
+                  <string>Show pressure intensity toggle hint</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="showMouseAndKeyboardToggleHint">
+                 <property name="text">
+                  <string>Show mouse and keyboard toggle hint</string>
                  </property>
                 </widget>
                </item>
@@ -2996,10 +3024,10 @@
                <item>
                 <spacer name="emulatorTabSpacerLeft">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -3090,7 +3118,7 @@
                      <bool>true</bool>
                     </property>
                     <property name="correctionMode">
-                     <enum>QAbstractSpinBox::CorrectToNearestValue</enum>
+                     <enum>QAbstractSpinBox::CorrectionMode::CorrectToNearestValue</enum>
                     </property>
                     <property name="keyboardTracking">
                      <bool>false</bool>
@@ -3105,7 +3133,7 @@
                      <number>99999</number>
                     </property>
                     <property name="stepType">
-                     <enum>QAbstractSpinBox::DefaultStepType</enum>
+                     <enum>QAbstractSpinBox::StepType::DefaultStepType</enum>
                     </property>
                     <property name="value">
                      <number>2000</number>
@@ -3158,7 +3186,7 @@
                           <bool>true</bool>
                          </property>
                          <property name="correctionMode">
-                          <enum>QAbstractSpinBox::CorrectToNearestValue</enum>
+                          <enum>QAbstractSpinBox::CorrectionMode::CorrectToNearestValue</enum>
                          </property>
                          <property name="keyboardTracking">
                           <bool>false</bool>
@@ -3192,7 +3220,7 @@
                           <bool>true</bool>
                          </property>
                          <property name="correctionMode">
-                          <enum>QAbstractSpinBox::CorrectToNearestValue</enum>
+                          <enum>QAbstractSpinBox::CorrectionMode::CorrectToNearestValue</enum>
                          </property>
                          <property name="keyboardTracking">
                           <bool>false</bool>
@@ -3242,7 +3270,7 @@
                <item>
                 <widget class="QSlider" name="shaderLoadBgDarkening">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
@@ -3256,17 +3284,17 @@
                <item>
                 <widget class="QSlider" name="shaderLoadBgBlur">
                  <property name="orientation">
-                  <enum>Qt::Horizontal</enum>
+                  <enum>Qt::Orientation::Horizontal</enum>
                  </property>
                 </widget>
                </item>
                <item>
                 <spacer name="spacer_shader_load">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -3291,7 +3319,7 @@
                   <string notr="true">FPS: 60 | Renderer | Version | Game [ID]</string>
                  </property>
                  <property name="alignment">
-                  <set>Qt::AlignCenter</set>
+                  <set>Qt::AlignmentFlag::AlignCenter</set>
                  </property>
                 </widget>
                </item>
@@ -3482,7 +3510,7 @@
                      <number>100</number>
                     </property>
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                    </widget>
                   </item>
@@ -3514,7 +3542,7 @@
                   <item>
                    <widget class="QSlider" name="perfOverlayFontSize">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                    </widget>
                   </item>
@@ -3546,7 +3574,7 @@
                   <item>
                    <widget class="QSlider" name="perfOverlayOpacity">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                    </widget>
                   </item>
@@ -3575,7 +3603,7 @@
                   <item>
                    <widget class="QSlider" name="slider_framerate_datapoints">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                    </widget>
                   </item>
@@ -3604,7 +3632,7 @@
                   <item>
                    <widget class="QSlider" name="slider_frametime_datapoints">
                     <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
+                     <enum>Qt::Orientation::Horizontal</enum>
                     </property>
                    </widget>
                   </item>
@@ -3614,10 +3642,10 @@
                <item>
                 <spacer name="emulatorTabSpacerRight">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -3637,10 +3665,10 @@
         <item>
          <spacer name="emulatorTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -3665,10 +3693,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -3760,10 +3788,10 @@
             <item>
              <spacer name="guiTabSpacerLeft">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -3885,10 +3913,10 @@
             <item>
              <spacer name="guiTabSpacerMiddle">
               <property name="orientation">
-               <enum>Qt::Vertical</enum>
+               <enum>Qt::Orientation::Vertical</enum>
               </property>
               <property name="sizeType">
-               <enum>QSizePolicy::MinimumExpanding</enum>
+               <enum>QSizePolicy::Policy::MinimumExpanding</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -3967,10 +3995,10 @@
                <item>
                 <spacer name="guiTabSpacerRight">
                  <property name="orientation">
-                  <enum>Qt::Vertical</enum>
+                  <enum>Qt::Orientation::Vertical</enum>
                  </property>
                  <property name="sizeType">
-                  <enum>QSizePolicy::MinimumExpanding</enum>
+                  <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                  </property>
                  <property name="sizeHint" stdset="0">
                   <size>
@@ -4043,7 +4071,7 @@
                   <string>UUID-placeholder</string>
                  </property>
                  <property name="alignment">
-                  <set>Qt::AlignCenter</set>
+                  <set>Qt::AlignmentFlag::AlignCenter</set>
                  </property>
                 </widget>
                </item>
@@ -4064,10 +4092,10 @@
         <item>
          <spacer name="guiTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -4092,10 +4120,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -4123,10 +4151,10 @@
              <string>GPU</string>
             </property>
             <property name="alignment">
-             <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+             <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
             </property>
             <layout class="QVBoxLayout" name="gb_debug_gpu_layout">
-             <item alignment="Qt::AlignTop">
+             <item alignment="Qt::AlignmentFlag::AlignTop">
               <widget class="QCheckBox" name="debugOutput">
                <property name="text">
                 <string>Debug Output</string>
@@ -4189,7 +4217,7 @@
                </property>
               </widget>
              </item>
-             <item alignment="Qt::AlignTop">
+             <item alignment="Qt::AlignmentFlag::AlignTop">
               <widget class="QCheckBox" name="renderdocCompatibility">
                <property name="enabled">
                 <bool>true</bool>
@@ -4206,7 +4234,7 @@
                </property>
               </widget>
              </item>
-             <item alignment="Qt::AlignTop">
+             <item alignment="Qt::AlignmentFlag::AlignTop">
               <widget class="QCheckBox" name="forceHighpZ">
                <property name="text">
                 <string>Use High Precision Z-Buffer</string>
@@ -4216,10 +4244,10 @@
              <item>
               <spacer name="verticalSpacerDebugGPU">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -4325,10 +4353,10 @@
              <item>
               <spacer name="verticalSpacerDebugCore">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -4343,7 +4371,7 @@
           </item>
           <item>
            <widget class="QWidget" name="debug_more_stuff" native="true">
-            <layout class="QVBoxLayout" name="debug_more_stuff_layout">
+            <layout class="QVBoxLayout" name="debug_more_stuff_layout" stretch="0,0,0,0,1">
              <property name="leftMargin">
               <number>0</number>
              </property>
@@ -4404,12 +4432,44 @@
               </widget>
              </item>
              <item>
+              <widget class="QGroupBox" name="gb_debug_io">
+               <property name="title">
+                <string>I/O</string>
+               </property>
+               <layout class="QVBoxLayout" name="gb_debug_io_layout">
+                <item>
+                 <widget class="QCheckBox" name="debugOverlayIO">
+                  <property name="text">
+                   <string>Debug Overlay For Pad Input</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <spacer name="verticalSpacer">
+                  <property name="orientation">
+                   <enum>Qt::Orientation::Vertical</enum>
+                  </property>
+                  <property name="sizeType">
+                   <enum>QSizePolicy::Policy::MinimumExpanding</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>0</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                 </spacer>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
               <spacer name="verticalSpacerDebugMore">
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <property name="sizeType">
-                <enum>QSizePolicy::MinimumExpanding</enum>
+                <enum>QSizePolicy::Policy::MinimumExpanding</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -4427,10 +4487,10 @@
         <item>
          <spacer name="debugTabSpacer">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::MinimumExpanding</enum>
+           <enum>QSizePolicy::Policy::MinimumExpanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -4455,10 +4515,10 @@
 </string>
              </property>
              <property name="textFormat">
-              <enum>Qt::PlainText</enum>
+              <enum>Qt::TextFormat::PlainText</enum>
              </property>
              <property name="alignment">
-              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
              </property>
              <property name="wordWrap">
               <bool>true</bool>
@@ -4476,7 +4536,7 @@
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
-      <set>QDialogButtonBox::Apply|QDialogButtonBox::Close|QDialogButtonBox::RestoreDefaults|QDialogButtonBox::Save</set>
+      <set>QDialogButtonBox::StandardButton::Apply|QDialogButtonBox::StandardButton::Close|QDialogButtonBox::StandardButton::RestoreDefaults|QDialogButtonBox::StandardButton::Save</set>
      </property>
     </widget>
    </item>

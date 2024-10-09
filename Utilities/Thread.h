@@ -276,6 +276,9 @@ public:
 	// Wait once with timeout. Infinite value is -1.
 	static void wait_for(u64 usec, bool alert = true);
 
+	// Wait once with time point, add_time is added to the time point.
+	static void wait_until(u64* wait_time, u64 add_time = 0, u64 min_wait = 0, bool update_to_current_time = true);
+
 	// Waiting with accurate timeout
 	static void wait_for_accurate(u64 usec);
 
@@ -508,14 +511,18 @@ class named_thread final : public Context, result_storage<Context>, thread_base
 #if defined(ARCH_X64)
 	static inline thread::native_entry trampoline = thread::make_trampoline(entry_point);
 #else
+#ifdef _WIN32
+	static uint trampoline(void* arg)
+#else
 	static void* trampoline(void* arg)
+#endif
 	{
 		if (const auto next = thread_base::finalize(entry_point(static_cast<thread_base*>(arg))))
 		{
 			return next(thread_ctrl::get_current());
 		}
 
-		return nullptr;
+		return {};
 	}
 #endif
 

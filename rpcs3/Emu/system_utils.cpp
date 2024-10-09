@@ -81,8 +81,8 @@ namespace rpcs3::utils
 		named_thread worker("PKG Installer", [&]
 		{
 			std::deque<std::string> bootables;
-			const package_error error = package_reader::extract_data(reader, bootables);
-			return error == package_error::no_error;
+			const package_install_result result = package_reader::extract_data(reader, bootables);
+			return result.error == package_install_result::error_type::no_error;
 		});
 
 		// Wait for the completion
@@ -105,6 +105,11 @@ namespace rpcs3::utils
 	{
 		const std::string& emu_dir_ = g_cfg_vfs.emulator_dir;
 		return emu_dir_.empty() ? fs::get_config_dir() : emu_dir_;
+	}
+
+	std::string get_games_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.games_dir, get_emu_dir());
 	}
 
 	std::string get_hdd0_dir()

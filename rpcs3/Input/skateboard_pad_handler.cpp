@@ -9,6 +9,7 @@ using namespace reports;
 namespace
 {
 	constexpr id_pair SKATEBOARD_ID_0 = {0x12BA, 0x0400}; // Tony Hawk RIDE Skateboard
+	constexpr id_pair SKATEBOARD_ID_1 = {0x1430, 0x0100}; // Tony Hawk SHRED Skateboard
 
 	enum button_flags : u16
 	{
@@ -40,7 +41,7 @@ namespace
 }
 
 skateboard_pad_handler::skateboard_pad_handler()
-    : hid_pad_handler<skateboard_device>(pad_handler::skateboard, {SKATEBOARD_ID_0})
+    : hid_pad_handler<skateboard_device>(pad_handler::skateboard, {SKATEBOARD_ID_0, SKATEBOARD_ID_1})
 {
 	// Unique names for the config files and our pad settings dialog
 	button_list =
@@ -81,6 +82,7 @@ skateboard_pad_handler::skateboard_pad_handler()
 	b_has_rgb = false;
 	b_has_player_led = false;
 	b_has_battery = false;
+	b_has_battery_led = false;
 	b_has_pressure_intensity_button = false;
 
 	m_name_string = "Skateboard #";
@@ -204,7 +206,7 @@ skateboard_pad_handler::DataStatus skateboard_pad_handler::get_data(skateboard_d
 	if (res == -1)
 	{
 		// looks like controller disconnected or read error
-		skateboard_log.error("get_data ReadError", device->path);
+		skateboard_log.error("get_data ReadError: %s", hid_error(device->hidDevice));
 		return DataStatus::ReadError;
 	}
 
@@ -227,40 +229,38 @@ skateboard_pad_handler::DataStatus skateboard_pad_handler::get_data(skateboard_d
 
 PadHandlerBase::connection skateboard_pad_handler::update_connection(const std::shared_ptr<PadDevice>& device)
 {
-	skateboard_device* skateboard_dev = static_cast<skateboard_device*>(device.get());
-	if (!skateboard_dev || skateboard_dev->path.empty())
+	skateboard_device* dev = static_cast<skateboard_device*>(device.get());
+	if (!dev || dev->path.empty())
 		return connection::disconnected;
 
-	if (skateboard_dev->hidDevice == nullptr)
+	if (dev->hidDevice == nullptr)
 	{
 		// try to reconnect
-		hid_device* dev = hid_open_path(skateboard_dev->path.c_str());
-		if (dev)
+		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
 		{
-			if (hid_set_nonblocking(dev, 1) == -1)
+			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
-				skateboard_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", skateboard_dev->path, hid_error(dev));
+				skateboard_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", dev->path, hid_error(hid_dev));
 			}
-			skateboard_dev->hidDevice = dev;
+			dev->hidDevice = hid_dev;
 		}
 		else
 		{
 			// nope, not there
-			skateboard_log.error("Device %s: disconnected", skateboard_dev->path);
+			skateboard_log.error("Device %s: disconnected", dev->path);
 			return connection::disconnected;
 		}
 	}
 
-	if (get_data(skateboard_dev) == DataStatus::ReadError)
+	if (get_data(dev) == DataStatus::ReadError)
 	{
 		// this also can mean disconnected, either way deal with it on next loop and reconnect
-		hid_close(skateboard_dev->hidDevice);
-		skateboard_dev->hidDevice = nullptr;
+		dev->close();
 
 		return connection::no_data;
 	}
 
-	if (!skateboard_dev->skateboard_is_on)
+	if (!dev->skateboard_is_on)
 	{
 		// This means that the dongle is still connected, but the skateboard is turned off.
 		// There is no need to reconnect the hid device again, we just have to check the input report for proper data.
@@ -356,13 +356,22 @@ void skateboard_pad_handler::apply_pad_data(const pad_ensemble& binding)
 
 	dev->new_output_data = false;
 
-	if (dev->new_output_data)
-	{
-		if (send_output_report(dev) >= 0)
-		{
-			dev->new_output_data = false;
-		}
-	}
+	// Disabled until needed
+	//const auto now = steady_clock::now();
+	//const auto elapsed = now - dev->last_output;
+
+	//if (dev->new_output_data || elapsed > min_output_interval)
+	//{
+	//	if (const int res = send_output_report(dev); res >= 0)
+	//	{
+	//		dev->new_output_data = false;
+	//		dev->last_output = now;
+	//	}
+	//	else if (res == -1)
+	//	{
+	//		skateboard_log.error("apply_pad_data: send_output_report failed! error=%s", hid_error(dev->hidDevice));
+	//	}
+	//}
 }
 
 void skateboard_pad_handler::SetPadData(const std::string& padId, u8 player_id, u8 /*large_motor*/, u8 /*small_motor*/, s32 /*r*/, s32 /*g*/, s32 /*b*/, bool /*player_led*/, bool /*battery_led*/, u32 /*battery_led_brightness*/)
@@ -377,5 +386,8 @@ void skateboard_pad_handler::SetPadData(const std::string& padId, u8 player_id, 
 	ensure(device->config);
 
 	// Disabled until needed
-	//send_output_report(device.get());
+	//if (send_output_report(device.get()) == -1)
+	//{
+	//	skateboard_log.error("SetPadData: send_output_report failed! Reason: %s", hid_error(device->hidDevice));
+	//}
 }

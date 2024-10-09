@@ -3,8 +3,7 @@
 #include "Utilities/StrFmt.h"
 
 #include <QKeyEvent>
-
-constexpr auto qstr = QString::fromStdString;
+#include <QMouseEvent>
 
 call_stack_list::call_stack_list(QWidget* parent) : QListWidget(parent)
 {
@@ -36,7 +35,7 @@ void call_stack_list::HandleUpdate(const std::vector<std::pair<u32, u32>>& call_
 
 	for (const auto& addr : call_stack)
 	{
-		const QString text = qstr(fmt::format("0x%08llx (sp=0x%08llx)", addr.first, addr.second));
+		const QString text = QString::fromStdString(fmt::format("0x%08llx (sp=0x%08llx)", addr.first, addr.second));
 		QListWidgetItem* call_stack_item = new QListWidgetItem(text);
 		call_stack_item->setData(Qt::UserRole, { addr.first });
 		addItem(call_stack_item);
@@ -52,4 +51,19 @@ void call_stack_list::ShowItemAddress()
 		const u32 address = call_stack_item->data(Qt::UserRole).value<u32>();
 		Q_EMIT RequestShowAddress(address);
 	}
+}
+
+void call_stack_list::mouseDoubleClickEvent(QMouseEvent* ev)
+{
+	if (!ev) return;
+
+	// Qt's itemDoubleClicked signal doesn't distinguish between mouse buttons and there is no simple way to get the pressed button.
+	// So we have to ignore this event when another button is pressed.
+	if (ev->button() != Qt::LeftButton)
+	{
+		ev->ignore();
+		return;
+	}
+
+	QListWidget::mouseDoubleClickEvent(ev);
 }

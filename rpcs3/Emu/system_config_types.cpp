@@ -332,9 +332,11 @@ void fmt_class_string<frame_limit_type>::format(std::string& out, u64 arg)
 		switch (value)
 		{
 		case frame_limit_type::none: return "Off";
+		case frame_limit_type::_30: return "30";
 		case frame_limit_type::_50: return "50";
 		case frame_limit_type::_60: return "60";
-		case frame_limit_type::_30: return "30";
+		case frame_limit_type::_120: return "120";
+		case frame_limit_type::display_rate: return "Display";
 		case frame_limit_type::_auto: return "Auto";
 		case frame_limit_type::_ps3: return "PS3 Native";
 		case frame_limit_type::infinite: return "Infinite";
@@ -504,21 +506,6 @@ void fmt_class_string<ghltar_handler>::format(std::string& out, u64 arg)
 		case ghltar_handler::null: return "Null";
 		case ghltar_handler::one_controller: return "1 controller";
 		case ghltar_handler::two_controllers: return "2 controllers";
-		}
-
-		return unknown;
-	});
-}
-
-template <>
-void fmt_class_string<gametablet_handler>::format(std::string& out, u64 arg)
-{
-	format_enum(out, arg, [](auto value)
-	{
-		switch (value)
-		{
-		case gametablet_handler::disabled: return "Disabled";
-		case gametablet_handler::enabled: return "Enabled";
 		}
 
 		return unknown;

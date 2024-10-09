@@ -30,9 +30,10 @@ enum CalibIndex
 class HidDevice : public PadDevice
 {
 public:
+	void close();
+
 	hid_device* hidDevice{nullptr};
 	std::string path;
-	bool new_output_data{true};
 	bool enable_player_leds{false};
 	u8 led_delay_on{0};
 	u8 led_delay_off{0};

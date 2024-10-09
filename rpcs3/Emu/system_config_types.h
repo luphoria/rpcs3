@@ -167,12 +167,6 @@ enum class ghltar_handler
 	two_controllers,
 };
 
-enum class gametablet_handler
-{
-	disabled,
-	enabled,
-};
-
 enum class microphone_handler
 {
 	null,
@@ -212,9 +206,11 @@ enum class video_aspect
 enum class frame_limit_type
 {
 	none,
+	_30,
 	_50,
 	_60,
-	_30,
+	_120,
+	display_rate,
 	_auto,
 	_ps3,
 	infinite,

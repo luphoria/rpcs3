@@ -110,18 +110,21 @@ static u64 make_null_function(const std::string& name)
 			c.align(AlignMode::kData, 16);
 #else
 			// AArch64 implementation
-			Label jmp_address = c.newLabel();
 			Label data = c.newLabel();
-			// Force absolute jump to prevent out of bounds PC-rel jmp
-			c.ldr(args[0], arm::ptr(jmp_address));
-			c.br(args[0]);
-			c.align(AlignMode::kCode, 16);
+			Label jump_address = c.newLabel();
+			c.ldr(args[0], arm::ptr(data, 0));
+			c.ldr(a64::x14, arm::ptr(jump_address, 0));
+			c.br(a64::x14);
 
+			// Data frame
+			c.align(AlignMode::kCode, 16);
+			c.bind(jump_address);
+			c.embedUInt64(reinterpret_cast<u64>(&null));
+
+			c.align(AlignMode::kData, 16);
 			c.bind(data);
 			c.embed(name.c_str(), name.size());
 			c.embedUInt8(0U);
-			c.bind(jmp_address);
-			c.embedUInt64(reinterpret_cast<u64>(&null));
 			c.align(AlignMode::kData, 16);
 #endif
 		});
@@ -372,7 +375,7 @@ public:
 			return;
 		}
 
-		jit_log.notice("LLVM: Created module: %s", _module->getName().data());
+		jit_log.trace("LLVM: Created module: %s", _module->getName().data());
 
 		// Restore space that was overestimated
 		ensure(m_compiler->add_sub_disk_space(max_size - module_file.size()));
@@ -439,6 +442,12 @@ std::string jit_compiler::cpu(const std::string& _cpu)
 	if (m_cpu.empty())
 	{
 		m_cpu = llvm::sys::getHostCPUName().str();
+
+		if (m_cpu == "generic")
+		{
+			// Try to detect a best match based on other criteria
+			m_cpu = fallback_cpu_detection();
+		}
 
 		if (m_cpu == "sandybridge" ||
 			m_cpu == "ivybridge" ||
@@ -511,7 +520,7 @@ std::string jit_compiler::triple1()
 #elif defined(__APPLE__) && defined(ARCH_X64)
 	return llvm::Triple::normalize("x86_64-unknown-linux-gnu");
 #elif defined(__APPLE__) && defined(ARCH_ARM64)
-	return llvm::Triple::normalize("aarch64-unknown-linux-gnu");
+	return llvm::Triple::normalize("aarch64-unknown-linux-android"); // Set environment to android to reserve x18
 #else
 	return llvm::Triple::normalize(llvm::sys::getProcessTriple());
 #endif
@@ -526,7 +535,7 @@ std::string jit_compiler::triple2()
 #elif defined(__APPLE__) && defined(ARCH_X64)
 	return llvm::Triple::normalize("x86_64-unknown-linux-gnu");
 #elif defined(__APPLE__) && defined(ARCH_ARM64)
-	return llvm::Triple::normalize("aarch64-unknown-linux-gnu");
+	return llvm::Triple::normalize("aarch64-unknown-linux-android"); // Set environment to android to reserve x18
 #else
 	return llvm::Triple::normalize(llvm::sys::getProcessTriple());
 #endif
@@ -715,6 +724,82 @@ void jit_compiler::fin()
 u64 jit_compiler::get(const std::string& name)
 {
 	return m_engine->getGlobalValueAddress(name);
+}
+
+llvm::StringRef fallback_cpu_detection()
+{
+#if defined (ARCH_X64)
+	// If we got here we either have a very old and outdated CPU or a new CPU that has not been seen by LLVM yet.
+	const std::string brand = utils::get_cpu_brand();
+	const auto family = utils::get_cpu_family();
+	const auto model = utils::get_cpu_model();
+
+	jit_log.error("CPU wasn't identified by LLVM, brand = %s, family = 0x%x, model = 0x%x", brand, family, model);
+
+	if (brand.starts_with("AMD"))
+	{
+		switch (family)
+		{
+		case 0x10:
+		case 0x12: // Unimplemented in LLVM
+			return "amdfam10";
+		case 0x15:
+			// Bulldozer class, includes piledriver, excavator, steamroller, etc
+			return utils::has_avx2() ? "bdver4" : "bdver1";
+		case 0x17:
+		case 0x18:
+			// No major differences between znver1 and znver2, return the lesser
+			return "znver1";
+		case 0x19:
+			// Models 0-Fh are zen3 as are 20h-60h. The rest we can assume are zen4
+			return ((model >= 0x20 && model <= 0x60) || model < 0x10) ? "znver3" : "znver4";
+		case 0x1a:
+			// Only one generation in family 1a so far, zen5, which we do not support yet.
+			// Return zen4 as a workaround until the next LLVM upgrade.
+			return "znver4";
+		default:
+		 	// Safest guesses
+			return utils::has_avx512() ? "znver4" :
+				utils::has_avx2() ? "znver1" :
+				utils::has_avx() ? "bdver1" :
+				"nehalem";
+		}
+	}
+	else if (brand.find("Intel") != std::string::npos)
+	{
+		if (!utils::has_avx())
+		{
+			return "nehalem";
+		}
+		if (!utils::has_avx2())
+		{
+			return "ivybridge";
+		}
+		if (!utils::has_avx512())
+		{
+			return "skylake";
+		}
+		if (utils::has_avx512_icl())
+		{
+			return "cannonlake";
+		}
+		return "icelake-client";
+	}
+	else if (brand.starts_with("VirtualApple"))
+	{
+		// No AVX. This will change in MacOS 15+, at which point we may revise this.
+		return utils::has_avx() ? "haswell" : "nehalem";
+	}
+
+#elif defined(ARCH_ARM64)
+	// TODO: Read the data from /proc/cpuinfo. ARM CPU registers are not accessible from usermode.
+	// This will be a pain when supporting snapdragon on windows but we'll cross that bridge when we get there.
+	// Require at least armv8-2a. Older chips are going to be useless anyway.
+	return "cortex-a78";
+#endif
+
+	// Failed to guess, use generic fallback
+	return "generic";
 }
 
 #endif // LLVM_AVAILABLE

@@ -24,6 +24,8 @@ private:
 	// taskbar progress
 	std::unique_ptr<progress_indicator> m_progress_indicator;
 
+	shortcut_handler* m_shortcut_handler = nullptr;
+
 	QRect m_initial_geometry;
 
 	std::shared_ptr<gui_settings> m_gui_settings;
@@ -55,6 +57,8 @@ public:
 	void delete_context(draw_context_t context) override;
 	void toggle_fullscreen() override;
 
+	void update_shortcuts();
+
 	// taskbar progress
 	void progress_reset(bool reset_limit = false);
 	void progress_set_value(int value);
@@ -75,8 +79,6 @@ protected:
 	void paintEvent(QPaintEvent *event) override;
 	void showEvent(QShowEvent *event) override;
 
-	void keyPressEvent(QKeyEvent *keyEvent) override;
-
 	void close() override;
 
 	bool shown() override;
@@ -89,15 +91,18 @@ protected:
 	void flip(draw_context_t context, bool skip_frame = false) override;
 	int client_width() override;
 	int client_height() override;
+	f64 client_display_rate() override;
+	bool has_alpha() override;
 
 	bool event(QEvent* ev) override;
 
 private:
+	void load_gui_settings();
 	void hide_on_close();
 	void toggle_recording();
 	void toggle_mouselock();
 	void update_cursor();
-	void handle_cursor(QWindow::Visibility visibility, bool from_event, bool start_idle_timer);
+	void handle_cursor(QWindow::Visibility visibility, bool visibility_changed, bool active_changed, bool start_idle_timer);
 
 private Q_SLOTS:
 	void mouse_hide_timeout();

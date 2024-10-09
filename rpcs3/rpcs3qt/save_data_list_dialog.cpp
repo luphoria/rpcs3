@@ -8,8 +8,9 @@
 #include <QHeaderView>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QMouseEvent>
 
-constexpr auto qstr = QString::fromStdString;
+LOG_CHANNEL(cellSaveData);
 
 //Show up the savedata list, either to choose one to save/load or to manage saves.
 //I suggest to use function callbacks to give save data list or get save data entry. (Not implemented or stubbed)
@@ -17,6 +18,8 @@ save_data_list_dialog::save_data_list_dialog(const std::vector<SaveDataEntry>& e
 	: QDialog(parent)
 	, m_save_entries(entries)
 {
+	cellSaveData.notice("Creating Qt save_data_list_dialog (entries=%d, focusedEntry=%d, op=0x%x, listSet=*0x%x)", entries.size(), focusedEntry, op, listSet);
+
 	if (op >= 8)
 	{
 		setWindowTitle(tr("Save Data Interface (Delete)"));
@@ -106,7 +109,7 @@ save_data_list_dialog::save_data_list_dialog(const std::vector<SaveDataEntry>& e
 	{
 		const int original_index = m_list->item(row, 0)->data(Qt::UserRole).toInt();
 		const SaveDataEntry original_entry = m_save_entries[original_index];
-		const QString original_dir_name = qstr(original_entry.dirName);
+		const QString original_dir_name = QString::fromStdString(original_entry.dirName);
 		QVariantMap notes = m_persistent_settings->GetValue(gui::persistent::save_notes).toMap();
 		notes[original_dir_name] = m_list->item(row, col)->text();
 		m_persistent_settings->SetValue(gui::persistent::save_notes, notes);
@@ -126,7 +129,7 @@ void save_data_list_dialog::UpdateSelectionLabel()
 		else
 		{
 			const int entry = m_list->item(m_list->currentRow(), 0)->data(Qt::UserRole).toInt();
-			m_entry_label->setText(tr("Currently Selected: ") + qstr(m_save_entries[entry].dirName));
+			m_entry_label->setText(tr("Currently Selected: ") + QString::fromStdString(m_save_entries[entry].dirName));
 		}
 	}
 }
@@ -185,9 +188,9 @@ void save_data_list_dialog::UpdateList()
 	int row = 0;
 	for (const SaveDataEntry& entry: m_save_entries)
 	{
-		QString title = qstr(entry.title);
-		QString subtitle = qstr(entry.subtitle);
-		QString dirName = qstr(entry.dirName);
+		const QString title = QString::fromStdString(entry.title);
+		const QString subtitle = QString::fromStdString(entry.subtitle);
+		const QString dirName = QString::fromStdString(entry.dirName);
 
 		QTableWidgetItem* titleItem = new QTableWidgetItem(title);
 		titleItem->setData(Qt::UserRole, row); // For sorting to work properly
@@ -228,4 +231,19 @@ void save_data_list_dialog::UpdateList()
 	const QSize max_size(preferred_size.width(), static_cast<int>(QGuiApplication::primaryScreen()->geometry().height() * 0.6));
 
 	resize(preferred_size.boundedTo(max_size));
+}
+
+void save_data_list_dialog::mouseDoubleClickEvent(QMouseEvent* ev)
+{
+	if (!ev) return;
+
+	// Qt's itemDoubleClicked signal doesn't distinguish between mouse buttons and there is no simple way to get the pressed button.
+	// So we have to ignore this event when another button is pressed.
+	if (ev->button() != Qt::LeftButton)
+	{
+		ev->ignore();
+		return;
+	}
+
+	QDialog::mouseDoubleClickEvent(ev);
 }

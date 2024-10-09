@@ -16,6 +16,7 @@
 #endif
 #include "keyboard_pad_handler.h"
 #include "Emu/Io/Null/NullPadHandler.h"
+#include "Emu/Io/interception.h"
 #include "Emu/Io/PadHandler.h"
 #include "Emu/Io/pad_config.h"
 #include "Emu/System.h"
@@ -41,6 +42,7 @@ namespace pad
 	atomic_t<bool> g_started{false};
 	atomic_t<bool> g_reset{false};
 	atomic_t<bool> g_enabled{true};
+	atomic_t<bool> g_home_menu_requested{false};
 }
 
 namespace rsx
@@ -171,7 +173,8 @@ void pad_thread::Init()
 		}
 		cur_pad_handler->Init();
 
-		m_pads[i] = std::make_shared<Pad>(handler_type, CELL_PAD_STATUS_DISCONNECTED, pad_settings[i].device_capability, pad_settings[i].device_type);
+		std::shared_ptr<Pad> pad = std::make_shared<Pad>(handler_type, i, CELL_PAD_STATUS_DISCONNECTED, pad_settings[i].device_capability, pad_settings[i].device_type);
+		m_pads[i] = pad;
 
 		if (pad_settings[i].is_ldd_pad)
 		{
@@ -179,20 +182,29 @@ void pad_thread::Init()
 		}
 		else
 		{
-			if (!cur_pad_handler->bindPadToDevice(m_pads[i], i))
+			if (!cur_pad_handler->bindPadToDevice(pad))
 			{
 				// Failed to bind the device to cur_pad_handler so binds to NullPadHandler
 				input_log.error("Failed to bind device '%s' to handler %s. Falling back to NullPadHandler.", cfg->device.to_string(), handler_type);
-				nullpad->bindPadToDevice(m_pads[i], i);
+				nullpad->bindPadToDevice(pad);
 			}
 
 			input_log.notice("Pad %d: device='%s', handler=%s, VID=0x%x, PID=0x%x, class_type=0x%x, class_profile=0x%x",
-				i, cfg->device.to_string(), m_pads[i]->m_pad_handler, m_pads[i]->m_vendor_id, m_pads[i]->m_product_id, m_pads[i]->m_class_type, m_pads[i]->m_class_profile);
+				i, cfg->device.to_string(), pad->m_pad_handler, pad->m_vendor_id, pad->m_product_id, pad->m_class_type, pad->m_class_profile);
+
+			if (pad->m_pad_handler != pad_handler::null)
+			{
+				input_log.notice("Pad %d: config=\n%s", i, cfg->to_string());
+			}
 		}
 
-		m_pads[i]->is_fake_pad = (g_cfg.io.move == move_handler::fake && i >= (static_cast<u32>(CELL_PAD_MAX_PORT_NUM) - static_cast<u32>(CELL_GEM_MAX_NUM))) || m_pads[i]->m_class_type == CELL_PAD_FAKE_TYPE_GUNCON3;
-		connect_usb_controller(i, input::get_product_by_vid_pid(m_pads[i]->m_vendor_id, m_pads[i]->m_product_id));
+		pad->is_fake_pad = (g_cfg.io.move == move_handler::fake && i >= (static_cast<u32>(CELL_PAD_MAX_PORT_NUM) - static_cast<u32>(CELL_GEM_MAX_NUM)))
+			|| (pad->m_class_type >= CELL_PAD_FAKE_TYPE_FIRST && pad->m_class_type < CELL_PAD_FAKE_TYPE_LAST);
+		connect_usb_controller(i, input::get_product_by_vid_pid(pad->m_vendor_id, pad->m_product_id));
 	}
+
+	// Initialize active mouse and keyboard. Activate pad handler if one exists.
+	input::set_mouse_and_keyboard(m_handlers.contains(pad_handler::keyboard) ? input::active_mouse_and_keyboard::pad : input::active_mouse_and_keyboard::emulated);
 }
 
 void pad_thread::SetRumble(const u32 pad, u8 large_motor, bool small_motor)
@@ -363,7 +375,10 @@ void pad_thread::operator()()
 			}
 		}
 
-		update_pad_states();
+		if (Emu.IsRunning())
+		{
+			update_pad_states();
+		}
 
 		m_info.now_connect = connected_devices + num_ldd_pad;
 
@@ -437,7 +452,7 @@ void pad_thread::operator()()
 			}
 
 			// Make sure we call this function only once per button press
-			if (ps_button_pressed && !m_ps_button_pressed)
+			if ((ps_button_pressed && !m_ps_button_pressed) || pad::g_home_menu_requested.exchange(false))
 			{
 				open_home_menu();
 			}

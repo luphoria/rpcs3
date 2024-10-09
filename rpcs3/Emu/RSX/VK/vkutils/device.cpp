@@ -202,7 +202,7 @@ namespace vk
 			}
 		}
 
-		if (get_chip_class() == chip_class::AMD_vega)
+		if (get_chip_class() == chip_class::AMD_vega && shader_types_support.allow_float16)
 		{
 			// Disable fp16 if driver uses LLVM emitter. It does fine with AMD proprietary drivers though.
 			shader_types_support.allow_float16 = (driver_properties.driverID == VK_DRIVER_ID_AMD_PROPRIETARY_KHR);
@@ -265,6 +265,11 @@ namespace vk
 				return driver_vendor::LAVAPIPE;
 			}
 
+			if (gpu_name.find("V3D") != umax)
+			{
+				return driver_vendor::V3DV;
+			}
+
 			return driver_vendor::unknown;
 		}
 		else
@@ -288,6 +293,8 @@ namespace vk
 				return driver_vendor::LAVAPIPE;
 			case VK_DRIVER_ID_MESA_NVK:
 				return driver_vendor::NVK;
+			case VK_DRIVER_ID_MESA_V3DV:
+				return driver_vendor::V3DV;
 			default:
 				// Mobile?
 				return driver_vendor::unknown;
@@ -604,6 +611,13 @@ namespace vk
 		{
 			rsx_log.error("Your GPU does not support framebuffer logical operations. Graphics may not render correctly.");
 			enabled_features.logicOp = VK_FALSE;
+		}
+
+		if (!pgpu->features.textureCompressionBC && pgpu->get_driver_vendor() == driver_vendor::V3DV)
+		{
+			// v3dv supports BC1-BC3 which is all we require, support is reported as false since not all formats are supported
+			rsx_log.error("Your GPU running on the V3DV driver does not support full texture block compression. Graphics may not render correctly.");
+			enabled_features.textureCompressionBC = VK_FALSE;
 		}
 
 		VkDeviceCreateInfo device = {};
