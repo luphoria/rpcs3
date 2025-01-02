@@ -65,6 +65,7 @@ add_library(rpcs3_ui STATIC
     pkg_install_dialog.cpp
     progress_dialog.cpp
     progress_indicator.cpp
+    ps_move_tracker_dialog.cpp
     qt_camera_handler.cpp
     qt_camera_video_sink.cpp
     qt_music_handler.cpp
@@ -117,6 +118,7 @@ add_library(rpcs3_ui STATIC
     pad_settings_dialog.ui
     patch_creator_dialog.ui
     patch_manager_dialog.ui
+    ps_move_tracker_dialog.ui
     settings_dialog.ui
     shortcut_dialog.ui
     welcome_dialog.ui
@@ -143,11 +145,13 @@ target_compile_definitions(rpcs3_ui PRIVATE WIN32_LEAN_AND_MEAN)
 
 target_link_libraries(rpcs3_ui
     PUBLIC
-        3rdparty::qt6 3rdparty::yaml-cpp
+        3rdparty::qt6
+        3rdparty::yaml-cpp
 
     PRIVATE
         rpcs3_emu
-        3rdparty::zlib 3rdparty::pugixml
+        3rdparty::zlib
+        3rdparty::pugixml
         3rdparty::discordRPC
         3rdparty::hidapi
         3rdparty::libusb
@@ -155,4 +159,6 @@ target_link_libraries(rpcs3_ui
         3rdparty::7zip
         3rdparty::wolfssl
         3rdparty::libcurl
+        3rdparty::opencv
+        3rdparty::fusion
         3rdparty::rtmidi)

@@ -27,6 +27,10 @@
 #elif defined(__APPLE__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic ignored "-Wmissing-declarations"
+#pragma GCC diagnostic ignored "-Wnullability-completeness"
+#pragma GCC diagnostic ignored "-Wdeprecated-anon-enum-enum-conversion"
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #pragma GCC diagnostic pop
@@ -198,6 +202,7 @@ std::shared_ptr<PadHandlerBase> gui_pad_thread::GetHandler(pad_handler type)
 	{
 	case pad_handler::null:
 	case pad_handler::keyboard:
+	case pad_handler::move:
 		// Makes no sense to use this if we are in the GUI anyway
 		return nullptr;
 	case pad_handler::ds3:

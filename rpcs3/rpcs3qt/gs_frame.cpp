@@ -10,6 +10,7 @@
 #include "Emu/system_config.h"
 #include "Emu/system_progress.hpp"
 #include "Emu/IdManager.h"
+#include "Emu/Audio/audio_utils.h"
 #include "Emu/Cell/Modules/cellScreenshot.h"
 #include "Emu/Cell/Modules/cellVideoOut.h"
 #include "Emu/Cell/Modules/cellAudio.h"
@@ -67,8 +68,6 @@ bool is_input_allowed()
 	return g_game_window_focused || g_cfg.io.background_input_enabled;
 }
 
-constexpr auto qstr = QString::fromStdString;
-
 gs_frame::gs_frame(QScreen* screen, const QRect& geometry, const QIcon& appIcon, std::shared_ptr<gui_settings> gui_settings, bool force_fullscreen)
 	: QWindow()
 	, m_initial_geometry(geometry)
@@ -118,7 +117,7 @@ gs_frame::gs_frame(QScreen* screen, const QRect& geometry, const QIcon& appIcon,
 	setMinimumHeight(90);
 	setScreen(screen);
 	setGeometry(geometry);
-	setTitle(qstr(m_window_title));
+	setTitle(QString::fromStdString(m_window_title));
 
 	if (g_cfg.video.renderer != video_renderer::opengl)
 	{
@@ -360,6 +359,21 @@ void gs_frame::handle_shortcut(gui::shortcuts::shortcut shortcut_key, const QKey
 		pad::g_home_menu_requested = true;
 		break;
 	}
+	case gui::shortcuts::shortcut::gw_mute_unmute:
+	{
+		audio::toggle_mute();
+		break;
+	}
+	case gui::shortcuts::shortcut::gw_volume_up:
+	{
+		audio::change_volume(5);
+		break;
+	}
+	case gui::shortcuts::shortcut::gw_volume_down:
+	{
+		audio::change_volume(-5);
+		break;
+	}
 	default:
 	{
 		break;
@@ -570,7 +584,7 @@ void gs_frame::hide_on_close()
 	m_gui_settings->SetValue(gui::gs_visibility, current_visibility == Visibility::Hidden ? Visibility::AutomaticVisibility : current_visibility, false);
 	m_gui_settings->SetValue(gui::gs_geometry, geometry(), true);
 
-	if (!g_progr.load())
+	if (!g_progr_text)
 	{
 		// Hide the dialog before stopping if no progress bar is being shown.
 		// Otherwise users might think that the game softlocked if stopping takes too long.
@@ -752,7 +766,7 @@ void gs_frame::flip(draw_context_t, bool /*skip_frame*/)
 
 			Emu.CallFromMainThread([this, title = std::move(new_title)]()
 			{
-				setTitle(qstr(title));
+				setTitle(QString::fromStdString(title));
 			});
 		}
 
@@ -941,7 +955,7 @@ void gs_frame::take_screenshot(std::vector<u8> data, u32 sshot_width, u32 sshot_
 
 					QImage overlay_img;
 
-					if (!overlay_img.load(qstr(cell_sshot_overlay_path)))
+					if (!overlay_img.load(QString::fromStdString(cell_sshot_overlay_path)))
 					{
 						screenshot_log.error("Failed to read cell screenshot overlay '%s' : %s", cell_sshot_overlay_path, fs::g_tls_error);
 						return;

@@ -58,14 +58,14 @@ public:
 
 	game_compatibility* GetGameCompatibility() const { return m_game_compat; }
 
-	const QList<game_info>& GetGameInfo() const;
+	const std::vector<game_info>& GetGameInfo() const;
 
 	void CreateShortcuts(const game_info& gameinfo, const std::set<gui::utils::shortcut_location>& locations);
 
 	bool IsEntryVisible(const game_info& game, bool search_fallback = false) const;
 
 public Q_SLOTS:
-	void BatchCreateCPUCaches(const QList<game_info>& game_data = QList<game_info>{});
+	void BatchCreateCPUCaches(const std::vector<game_info>& game_data = {});
 	void BatchRemovePPUCaches();
 	void BatchRemoveSPUCaches();
 	void BatchRemoveCustomConfigurations();
@@ -141,6 +141,7 @@ private:
 	static u32 RemoveContentPathList(const std::vector<std::string>& path_list, const std::string& desc);
 	static bool RemoveContentBySerial(const std::string& base_dir, const std::string& serial, const std::string& desc);
 	static std::vector<std::string> GetDirListBySerial(const std::string& base_dir, const std::string& serial);
+	void BatchActionBySerials(progress_dialog* pdlg, const std::set<std::string>& serials, QString progressLabel, std::function<bool(const std::string&)> action, std::function<void(u32, u32)> cancel_log, bool refresh_on_finish, bool can_be_concurrent = false, std::function<bool()> should_wait_cb = {});
 	static std::string GetCacheDirBySerial(const std::string& serial);
 	static std::string GetDataDirBySerial(const std::string& serial);
 	std::string CurrentSelectionPath();
@@ -166,8 +167,8 @@ private:
 	Qt::SortOrder m_col_sort_order{};
 	int m_sort_column{};
 	bool m_initial_refresh_done = false;
-	QMap<QString, QString> m_notes;
-	QMap<QString, QString> m_titles;
+	std::map<QString, QString> m_notes;
+	std::map<QString, QString> m_titles;
 
 	// Categories
 	QStringList m_category_filters;
@@ -181,7 +182,7 @@ private:
 	std::shared_ptr<gui_settings> m_gui_settings;
 	std::shared_ptr<emu_settings> m_emu_settings;
 	std::shared_ptr<persistent_settings> m_persistent_settings;
-	QList<game_info> m_game_data;
+	std::vector<game_info> m_game_data;
 	struct path_entry
 	{
 		std::string path;

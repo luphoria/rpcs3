@@ -109,13 +109,15 @@ extern thread_local std::string(*g_tls_log_prefix)();
 // Report error and call std::abort(), defined in main.cpp
 [[noreturn]] void report_fatal_error(std::string_view text, bool is_html = false, bool include_help_text = true);
 
+enum cpu_threads_emulation_info_dump_t : u32 {};
+
 std::string dump_useful_thread_info()
 {
 	std::string result;
 
 	if (auto cpu = get_current_cpu_thread())
 	{
-		cpu->dump_all(result);
+		fmt::append(result, "%s", cpu_threads_emulation_info_dump_t{cpu->id});
 	}
 
 	return result;
@@ -1358,7 +1360,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 	// check if address is RawSPU MMIO register
 	do if (addr - RAW_SPU_BASE_ADDR < (6 * RAW_SPU_OFFSET) && (addr % RAW_SPU_OFFSET) >= RAW_SPU_PROB_OFFSET)
 	{
-		auto thread = idm::get<named_thread<spu_thread>>(spu_thread::find_raw_spu((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET));
+		auto thread = idm::get_unlocked<named_thread<spu_thread>>(spu_thread::find_raw_spu((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET));
 
 		if (!thread)
 		{
@@ -1546,7 +1548,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			}
 		}
 
-		if (auto pf_port = idm::get<lv2_obj, lv2_event_port>(pf_port_id); pf_port && pf_port->queue)
+		if (auto pf_port = idm::get_unlocked<lv2_obj, lv2_event_port>(pf_port_id); pf_port && pf_port->queue)
 		{
 			// We notify the game that a page fault occurred so it can rectify it.
 			// Note, for data3, were the memory readable AND we got a page fault, it must be due to a write violation since reads are allowed.
@@ -2553,13 +2555,13 @@ std::string thread_ctrl::get_name_cached()
 	return *name_cache;
 }
 
-thread_base::thread_base(native_entry entry, std::string name)
+thread_base::thread_base(native_entry entry, std::string name) noexcept
 	: entry_point(entry)
 	, m_tname(make_single_value(std::move(name)))
 {
 }
 
-thread_base::~thread_base()
+thread_base::~thread_base() noexcept
 {
 	// Cleanup abandoned tasks: initialize default results and signal
 	this->exec();
@@ -2600,7 +2602,7 @@ bool thread_base::join(bool dtor) const
 
 		if (i >= 16 && !(i & (i - 1)) && timeout != atomic_wait_timeout::inf)
 		{
-			sig_log.error(u8"Thread [%s] is too sleepy. Waiting for it %.3fµs already!", *m_tname.load(), (utils::get_tsc() - stamp0) / (utils::get_tsc_freq() / 1000000.));
+			sig_log.error("Thread [%s] is too sleepy. Waiting for it %.3fus already!", *m_tname.load(), (utils::get_tsc() - stamp0) / (utils::get_tsc_freq() / 1000000.));
 		}
 	}
 
@@ -2731,7 +2733,7 @@ void thread_base::exec()
 
 [[noreturn]] void thread_ctrl::emergency_exit(std::string_view reason)
 {
-	if (std::string info = dump_useful_thread_info(); !info.empty())
+	if (const std::string info = dump_useful_thread_info(); !info.empty())
 	{
 		sys_log.notice("\n%s", info);
 	}

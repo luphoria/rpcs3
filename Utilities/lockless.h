@@ -4,12 +4,13 @@
 #include "util/atomic.hpp"
 #include "util/bless.hpp"
 
-//! Simple unshrinkable array base for concurrent access. Only growths automatically.
-//! There is no way to know the current size. The smaller index is, the faster it's accessed.
-//!
-//! T is the type of elements. Currently, default constructor of T shall be constexpr.
-//! N is initial element count, available without any memory allocation and only stored contiguously.
-template <typename T, usz N>
+// Simple unshrinkable array base for concurrent access. Only growths automatically.
+// There is no way to know the current size. The smaller index is, the faster it's accessed.
+//
+// T is the type of elements. Currently, default constructor of T shall be constexpr.
+// N is initial element count, available without any memory allocation and only stored contiguously.
+// Let's have around 256 bytes or less worth of preallocated elements
+template <typename T, usz N = std::max<usz>(256 / sizeof(T), 1)>
 class lf_array
 {
 	// Data (default-initialized)
@@ -31,22 +32,100 @@ public:
 
 	T& operator [](usz index)
 	{
-		if (index < N) [[likely]]
+		lf_array* _this = this;
+
+		T* result{};
+		bool installed = false;
+
+		for (usz i = 0;; i += N)
 		{
-			return m_data[index];
-		}
-		else if (!m_next) [[unlikely]]
-		{
-			// Create new array block. It's not a full-fledged once-synchronization, unlikely needed.
-			for (auto _new = new lf_array, ptr = this; ptr;)
+			if (index - i < N)
 			{
-				// Install the pointer. If failed, go deeper.
-				ptr = ptr->m_next.compare_and_swap(nullptr, _new);
+				result = std::addressof(_this->m_data[index - i]);
+				break;
 			}
+
+			lf_array* next = _this->m_next;
+
+			if (!next)
+			{
+				// Do not allow access beyond many element more at a time 
+				ensure(!installed && index - i < N * 2);
+
+				installed = true;
+
+				for (auto _new = new lf_array, ptr = _this; ptr;)
+				{
+					// Install the pointer. If failed, go deeper.
+					ptr = ptr->m_next.compare_and_swap(nullptr, _new);
+
+					if (!next)
+					{
+						// Determine the next pointer (if null then the new memory has been installed)
+						next = ptr ? ptr : _new;
+					}
+				}
+			}
+
+			_this = next;
 		}
 
-		// Access recursively
-		return (*m_next)[index - N];
+		return *result;
+	}
+
+	template <typename F> requires (std::is_invocable_v<F, T&>)
+	auto for_each(F&& func, bool is_finite = true)
+	{
+		lf_array* _this = this;
+
+		using return_t = std::invoke_result_t<F, T&>;
+
+		while (_this)
+		{
+			for (usz j = 0; j < N; j++)
+			{
+				if constexpr (std::is_void_v<return_t>)
+				{
+					std::invoke(func, _this->m_data[j]);
+				}
+				else
+				{
+					auto ret = std::invoke(func, _this->m_data[j]);
+
+					if (ret)
+					{
+						return std::make_pair(std::addressof(_this->m_data[j]), std::move(ret));
+					}
+				}
+			}
+
+			lf_array* next = _this->m_next;
+
+			if constexpr (!std::is_void_v<return_t>)
+			{
+				if (!next && !is_finite)
+				{
+					for (auto _new = new lf_array, ptr = _this; ptr;)
+					{
+						// Install the pointer. If failed, go deeper.
+						ptr = ptr->m_next.compare_and_swap(nullptr, _new);
+
+						if (!next)
+						{
+							// Determine the next pointer (if null then the new memory has been installed)
+							next = ptr ? ptr : _new;
+						}
+					}
+				}
+			}
+
+			_this = next;
+		}
+
+		if constexpr (!std::is_void_v<return_t>)
+		{
+			return std::make_pair(std::add_pointer_t<T>{}, return_t());
+		}
 	}
 
 	u64 size() const
@@ -62,9 +141,9 @@ public:
 	}
 };
 
-//! Simple lock-free FIFO queue base. Based on lf_array<T, N> itself. Currently uses 32-bit counters.
-//! There is no "push_end" or "pop_begin" provided, the queue element must signal its state on its own.
-template<typename T, usz N>
+// Simple lock-free FIFO queue base. Based on lf_array<T, N> itself. Currently uses 32-bit counters.
+// There is no "push_end" or "pop_begin" provided, the queue element must signal its state on its own.
+template<typename T, usz N = std::max<usz>(256 / sizeof(T), 1)>
 class lf_fifo : public lf_array<T, N>
 {
 	// LSB 32-bit: push, MSB 32-bit: pop

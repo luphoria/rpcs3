@@ -78,12 +78,12 @@ atomic_t<u64> g_watchdog_hold_ctr{0};
 extern bool ppu_load_exec(const ppu_exec_object&, bool virtual_load, const std::string&, utils::serial* = nullptr);
 extern void spu_load_exec(const spu_exec_object&);
 extern void spu_load_rel_exec(const spu_rel_object&);
-extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<ppu_module*>* loaded_prx);
-extern bool ppu_initialize(const ppu_module&, bool check_only = false, u64 file_size = 0);
-extern void ppu_finalize(const ppu_module&);
+extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<ppu_module<lv2_obj>*>* loaded_prx);
+extern bool ppu_initialize(const ppu_module<lv2_obj>&, bool check_only = false, u64 file_size = 0);
+extern void ppu_finalize(const ppu_module<lv2_obj>&);
 extern void ppu_unload_prx(const lv2_prx&);
-extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, bool virtual_load, const std::string&, s64 = 0, utils::serial* = nullptr);
-extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, bool virtual_load, const std::string& path, s64 = 0, utils::serial* = nullptr);
+extern shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, bool virtual_load, const std::string&, s64 = 0, utils::serial* = nullptr);
+extern std::pair<shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, bool virtual_load, const std::string& path, s64 = 0, utils::serial* = nullptr);
 extern bool ppu_load_rel_exec(const ppu_rel_object&);
 
 extern void send_close_home_menu_cmds();
@@ -142,6 +142,7 @@ void fmt_class_string<game_boot_result>::format(std::string& out, u64 arg)
 		case game_boot_result::savestate_version_unsupported: return "Savestate versioning data differs from your RPCS3 build.\nTry to use an older or newer RPCS3 build.\nEspecially if you know the build that created the savestate.";
 		case game_boot_result::still_running: return "Game is still running";
 		case game_boot_result::already_added: return "Game was already added";
+		case game_boot_result::currently_restricted: return "Booting is restricted at the time being";
 		}
 		return unknown;
 	});
@@ -208,7 +209,7 @@ void Emulator::BlockingCallFromMainThread(std::function<void()>&& func, std::sou
 // This function ensures constant initialization order between different compilers and builds
 void init_fxo_for_exec(utils::serial* ar, bool full = false)
 {
-	g_fxo->init<main_ppu_module>();
+	g_fxo->init<main_ppu_module<lv2_obj>>();
 
 	void init_ppu_functions(utils::serial* ar, bool full);
 
@@ -304,7 +305,7 @@ static void fixup_settings(const psf::registry* _psf)
 	}
 }
 
-extern void dump_executable(std::span<const u8> data, const ppu_module* _module, std::string_view title_id)
+extern void dump_executable(std::span<const u8> data, const ppu_module<lv2_obj>* _module, std::string_view title_id)
 {
 	std::string_view filename = _module->path;
 	filename = filename.substr(filename.find_last_of('/') + 1);
@@ -581,7 +582,7 @@ void Emulator::Init()
 			fs::write_file(games_common_dir + "/Disc Games Can Be Put Here For Automatic Detection.txt", fs::create + fs::excl + fs::write, ""s);
 
 #ifdef _WIN32
-			if (std::string rpcs3_shortcuts = games_common_dir + "/shortcuts"; make_path_verbose(rpcs3_shortcuts, false))
+			if (const std::string rpcs3_shortcuts = games_common_dir + "/shortcuts"; make_path_verbose(rpcs3_shortcuts, false))
 			{
 				fs::write_file(rpcs3_shortcuts + "/Copyable Shortcuts For Installed Games Would Be Added Here.txt", fs::create + fs::excl + fs::write, ""s);
 			}
@@ -732,50 +733,88 @@ std::string Emulator::GetBackgroundPicturePath() const
 		return path;
 	}
 
-	path = m_sfo_dir + "/PIC1.PNG";
+	std::string disc_dir = vfs::get("/dev_bdvd/PS3_GAME");
 
-	if (!fs::is_file(path))
+	if (m_sfo_dir == disc_dir)
 	{
-		const std::string disc_dir = vfs::get("/dev_bdvd/PS3_GAME");
+		disc_dir.clear();
+	}
 
-		if (disc_dir.empty())
-		{
-			// Fallback to ICON0.PNG
-			path = m_sfo_dir + "/ICON0.PNG";
-		}
-		else
-		{
-			// Fallback to PIC1.PNG in disc dir
-			path = disc_dir + "/PIC1.PNG";
+	constexpr auto search_barrier = "barrier";
 
-			if (!fs::is_file(path))
+	std::initializer_list<std::string> testees =
+	{
+		m_sfo_dir + "/PIC0.PNG",
+		m_sfo_dir + "/PIC1.PNG",
+		m_sfo_dir + "/PIC2.PNG",
+		m_sfo_dir + "/PIC3.PNG",
+		search_barrier,
+		!disc_dir.empty() ? (disc_dir + "/PIC0.PNG") : disc_dir,
+		!disc_dir.empty() ? (disc_dir + "/PIC1.PNG") : disc_dir,
+		!disc_dir.empty() ? (disc_dir + "/PIC2.PNG") : disc_dir,
+		!disc_dir.empty() ? (disc_dir + "/PIC3.PNG") : disc_dir,
+		search_barrier,
+		m_sfo_dir + "/ICON0.PNG",
+		search_barrier,
+		!disc_dir.empty() ? (disc_dir + "/ICON0.PNG") : disc_dir,
+	};
+
+	// Try to return the picture with the highest resultion
+	// Be naive and assume that its the one that spans over the most bytes
+	usz max_file_size = 0;
+	usz index_of_largest_file = umax;
+
+	for (usz index = 0; index < testees.size(); index++)
+	{
+		const std::string& path = testees.begin()[index];
+
+		fs::stat_t file_stat{};
+
+		if (path == search_barrier)
+		{
+			if (index_of_largest_file != umax)
 			{
-				// Fallback to ICON0.PNG in update dir
-				path = m_sfo_dir + "/ICON0.PNG";
-
-				if (!fs::is_file(path))
-				{
-					// Fallback to ICON0.PNG in disc dir
-					path = disc_dir + "/ICON0.PNG";
-				}
+				// Found a file in the preferred image group
+				break;
 			}
+
+			continue;
+		}
+
+		if (path.empty() || !fs::get_stat(path, file_stat) || file_stat.is_directory)
+		{
+			continue;
+		}
+
+		if (max_file_size < file_stat.size)
+		{
+			max_file_size = file_stat.size;
+			index_of_largest_file = index;
 		}
 	}
 
-	return path;
+	if (index_of_largest_file == umax)
+	{
+		return {};
+	}
+
+	return testees.begin()[index_of_largest_file];
 }
 
 bool Emulator::BootRsxCapture(const std::string& path)
 {
-	if (m_state != system_state::stopped)
+	if (m_state != system_state::stopped || m_restrict_emu_state_change)
 	{
 		return false;
 	}
+
+	m_state = system_state::loading;
 
 	fs::file in_file(path);
 
 	if (!in_file)
 	{
+		m_state = system_state::stopped;
 		return false;
 	}
 
@@ -802,6 +841,7 @@ bool Emulator::BootRsxCapture(const std::string& path)
 
 		if (load.data.empty())
 		{
+			m_state = system_state::stopped;
 			sys_log.error("Failed to unzip rsx capture file!");
 			return false;
 		}
@@ -815,18 +855,22 @@ bool Emulator::BootRsxCapture(const std::string& path)
 
 	if (frame->magic != rsx::c_fc_magic)
 	{
+		m_state = system_state::stopped;
 		sys_log.error("Invalid rsx capture file!");
 		return false;
 	}
 
 	if (frame->version != rsx::c_fc_version)
 	{
+		m_state = system_state::stopped;
 		sys_log.error("Rsx capture file version not supported! Expected %d, found %d", +rsx::c_fc_version, frame->version);
 		return false;
 	}
 
 	if (frame->LE_format != u32{std::endian::little == std::endian::native})
 	{
+		m_state = system_state::stopped;
+
 		static constexpr std::string_view machines[2]{"Big-Endian", "Little-Endian"};
 
 		sys_log.error("Rsx capture byte endianness not supported! Expected %s format, found %s format"
@@ -893,13 +937,33 @@ game_boot_result Emulator::GetElfPathFromDir(std::string& elf_path, const std::s
 
 game_boot_result Emulator::BootGame(const std::string& path, const std::string& title_id, bool direct, cfg_mode config_mode, const std::string& config_path)
 {
+	if (m_restrict_emu_state_change)
+	{
+		return game_boot_result::currently_restricted;
+	}
+
 	auto save_args = std::make_tuple(m_path, m_path_original, argv, envp, data, disc, klic, hdd1, m_config_mode, m_config_path);
 
 	auto restore_on_no_boot = [&](game_boot_result result)
 	{
-		if (IsStopped() || result != game_boot_result::no_errors)
+		if (m_state == system_state::stopped || result != game_boot_result::no_errors)
 		{
-			std::tie(m_path, m_path_original, argv, envp, data, disc, klic, hdd1, m_config_mode, m_config_path) = std::move(save_args);
+			ensure(IsStopped());
+
+			if (m_state == system_state::stopped)
+			{
+				std::tie(m_path, m_path_original, argv, envp, data, disc, klic, hdd1, m_config_mode, m_config_path) = std::move(save_args);
+			}
+			else
+			{
+				ensure(m_state == system_state::stopping);
+
+				// Execute after Kill() is done
+				Emu.after_kill_callback = [save_args = std::move(save_args), this]() mutable
+				{
+					std::tie(m_path, m_path_original, argv, envp, data, disc, klic, hdd1, m_config_mode, m_config_path) = std::move(save_args);
+				};
+			}
 		}
 
 		return result;
@@ -943,10 +1007,40 @@ void Emulator::SetForceBoot(bool force_boot)
 
 game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch, usz recursion_count)
 {
-	if (m_state != system_state::stopped)
+	if (recursion_count == 0 && m_restrict_emu_state_change)
+	{
+		return game_boot_result::currently_restricted;
+	}
+
+	if (recursion_count == 0 && m_state != system_state::stopped)
 	{
 		return game_boot_result::still_running;
 	}
+
+	struct cleanup_t
+	{
+		Emulator* _this;
+		usz recursion_count;
+
+		~cleanup_t() noexcept
+		{
+			if (recursion_count != 0)
+			{
+				return;
+			}
+
+			_this->m_state.compare_and_swap_test(system_state::loading, system_state::stopped);
+
+			if (_this->IsStopped())
+			{
+				_this->Kill(false);
+			}
+		}
+	} cleanup{this, recursion_count};
+
+	ensure(recursion_count != 0 || m_state.compare_and_swap_test(system_state::stopped, system_state::loading));
+
+	const auto guard = MakeEmulationStateGuard();
 
 	// Enable logging
 	rpcs3::utils::configure_logs(true);
@@ -1027,20 +1121,6 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 
 	sys_log.notice("Selected config: mode=%s, path=\"%s\"", m_config_mode, m_config_path);
 	sys_log.notice("Path: %s", m_path);
-
-	struct cleanup_t
-	{
-		Emulator* _this;
-		bool cleanup = true;
-
-		~cleanup_t()
-		{
-			if (cleanup && _this->IsStopped())
-			{
-				_this->Kill(false);
-			}
-		}
-	} cleanup{this};
 
 	std::string inherited_ps3_game_path;
 
@@ -1225,8 +1305,8 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 
 				if (game_data.find_first_of('\0') != umax || !sysutil_check_name_string(game_data.c_str(), 1, CELL_GAME_DIRNAME_SIZE))
 				{
-					const std::basic_string_view<u8> dirname{reinterpret_cast<const u8*>(game_data.data()), game_data.size()};
-					fmt::throw_exception("HDD0 deserialization failed: Invalid directory name: %s, ar=%s", dirname.substr(0, CELL_GAME_DIRNAME_SIZE + 1), *m_ar);
+					const std::span<const u8> dirname{reinterpret_cast<const u8*>(game_data.data()), game_data.size()};
+					fmt::throw_exception("HDD0 deserialization failed: Invalid directory name: %s, ar=%s", dirname.subspan(0, CELL_GAME_DIRNAME_SIZE + 1), *m_ar);
 				}
 
 				load_tar(hdd0_game + game_data, "");
@@ -1586,7 +1666,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 		{
 			m_state = system_state::ready;
 			GetCallbacks().on_ready();
-			g_fxo->init<main_ppu_module>();
+			ensure(g_fxo->init<main_ppu_module<lv2_obj>>());
 			vm::init();
 			m_force_boot = false;
 
@@ -1674,7 +1754,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 
 					if (obj == elf_error::ok && ppu_load_exec(obj, true, path))
 					{
-						ensure(g_fxo->try_get<main_ppu_module>())->path = path;
+						ensure(g_fxo->try_get<main_ppu_module<lv2_obj>>())->path = path;
 					}
 					else
 					{
@@ -1685,7 +1765,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 
 			g_fxo->init<named_thread>("SPRX Loader"sv, [this, dir_queue]() mutable
 			{
-				if (auto& _main = *ensure(g_fxo->try_get<main_ppu_module>()); !_main.path.empty())
+				if (auto& _main = *ensure(g_fxo->try_get<main_ppu_module<lv2_obj>>()); !_main.path.empty())
 				{
 					if (!_main.analyse(0, _main.elf_entry, _main.seg0_code_end, _main.applied_patches, std::vector<u32>{}, [](){ return Emu.IsStopped(); }))
 					{
@@ -2285,7 +2365,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 				sys_log.error("Booting HG category outside of HDD0!");
 			}
 
-			const auto _main = g_fxo->init<main_ppu_module>();
+			const auto _main = ensure(g_fxo->init<main_ppu_module<lv2_obj>>());
 
 			if (ppu_load_exec(ppu_exec, false, m_path, DeserialManager()))
 			{
@@ -2638,8 +2718,15 @@ bool Emulator::Pause(bool freeze_emulation, bool show_resume_message)
 		cpu.state += cpu_flag::dbg_global_pause;
 	};
 
-	idm::select<named_thread<ppu_thread>>(on_select);
-	idm::select<named_thread<spu_thread>>(on_select);
+	if (g_fxo->is_init<id_manager::id_map<named_thread<ppu_thread>>>())
+	{
+		idm::select<named_thread<ppu_thread>>(on_select);
+	}
+
+	if (g_fxo->is_init<id_manager::id_map<named_thread<spu_thread>>>())
+	{
+		idm::select<named_thread<spu_thread>>(on_select);
+	}
 
 	if (auto rsx = g_fxo->try_get<rsx::thread>())
 	{
@@ -2680,6 +2767,7 @@ bool Emulator::Pause(bool freeze_emulation, bool show_resume_message)
 			std::unique_ptr<named_thread<decltype(refresh_l)>> m_thread;
 		};
 
+		g_fxo->need<thread_t>();
 		g_fxo->get<thread_t>().m_thread.reset();
 		g_fxo->get<thread_t>().m_thread = std::make_unique<named_thread<decltype(refresh_l)>>("Pause Message Thread"sv, std::move(refresh_l));
 	});
@@ -2805,18 +2893,32 @@ void Emulator::Resume()
 
 u64 get_sysutil_cb_manager_read_count();
 
-void process_qt_events();
+void qt_events_aware_op(int repeat_duration_ms, std::function<bool()> wrapped_op);
 
 void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savestate)
 {
-	const auto old_state = m_state.load();
+	// Ensure no game has booted inbetween
+	const auto guard = Emu.MakeEmulationStateGuard();
+
+	stop_counter_t old_emu_id{};
+	system_state old_state{};
+
+	// Perform atomic load of both
+	do
+	{
+		old_emu_id = GetEmulationIdentifier();
+		old_state = m_state.load();
+	}
+	while (old_emu_id != GetEmulationIdentifier() || old_state != m_state.load());
 
 	if (old_state == system_state::stopped || old_state == system_state::stopping)
 	{
-		while (!async_op && m_state != system_state::stopped)
+		if (!async_op && old_state == system_state::stopping)
 		{
-			process_qt_events();
-			std::this_thread::sleep_for(16ms);
+			qt_events_aware_op(5, [&]()
+			{
+				return old_emu_id != GetEmulationIdentifier() || m_state != system_state::stopping;
+			});
 		}
 
 		return;
@@ -2824,10 +2926,12 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 
 	if (!savestate && m_emu_state_close_pending)
 	{
-		while (!async_op && m_state != system_state::stopped)
+		if (!async_op)
 		{
-			process_qt_events();
-			std::this_thread::sleep_for(16ms);
+			qt_events_aware_op(5, [&]()
+			{
+				return old_emu_id != GetEmulationIdentifier() || m_state != system_state::stopping;
+			});
 		}
 
 		return;
@@ -2845,10 +2949,12 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 		// The callback has been rudely ignored, we have no other option but to force termination
 		Kill(allow_autoexit && !savestate, savestate);
 
-		while (!async_op && m_state != system_state::stopped)
+		if (!async_op)
 		{
-			process_qt_events();
-			std::this_thread::sleep_for(16ms);
+			qt_events_aware_op(5, [&]()
+			{
+				return (old_emu_id != GetEmulationIdentifier() || m_state == system_state::stopped);
+			});
 		}
 
 		return;
@@ -2858,17 +2964,20 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 	{
 		bool read_sysutil_signal = false;
 
-		for (u32 i = 100; i < 140; i++)
+		u32 i = 100;
+
+		qt_events_aware_op(50, [&]()
 		{
-			std::this_thread::sleep_for(50ms);
+			if (i >= 140)
+			{
+				return true;
+			}
 
 			// TODO: Prevent pausing by other threads while in this loop
 			CallFromMainThread([this]()
 			{
 				Resume();
 			}, nullptr, true, read_counter);
-
-			process_qt_events(); // Is nullified when performed on non-main thread
 
 			if (!read_sysutil_signal && read_counter != get_sysutil_cb_manager_read_count())
 			{
@@ -2878,9 +2987,13 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 
 			if (static_cast<u64>(info) != m_stop_ctr)
 			{
-				return;
+				return true;
 			}
-		}
+
+			// Process events
+			i++;
+			return false;
+		});
 
 		// An inevitable attempt to terminate the *current* emulation course will be issued after 7s
 		CallFromMainThread([allow_autoexit, this]()
@@ -2897,16 +3010,15 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 	{
 		perform_kill();
 
-		while (m_state != system_state::stopped)
+		qt_events_aware_op(5, [&]()
 		{
-			process_qt_events();
-			std::this_thread::sleep_for(16ms);
-		}
+			return (old_emu_id != GetEmulationIdentifier() || m_state == system_state::stopped);
+		});
 	}
 }
 
 extern bool check_if_vdec_contexts_exist();
-extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool revert_lock = false, std::vector<std::pair<std::shared_ptr<named_thread<spu_thread>>, u32>>* out_list = nullptr);
+extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool revert_lock = false, std::vector<std::pair<shared_ptr<named_thread<spu_thread>>, u32>>* out_list = nullptr);
 
 void Emulator::Kill(bool allow_autoexit, bool savestate, savestate_stage* save_stage)
 {
@@ -2928,7 +3040,7 @@ void Emulator::Kill(bool allow_autoexit, bool savestate, savestate_stage* save_s
 
 			*pause_thread = make_ptr(new named_thread("Savestate Prepare Thread"sv, [pause_thread, allow_autoexit, this]() mutable
 			{
-				std::vector<std::pair<std::shared_ptr<named_thread<spu_thread>>, u32>> paused_spus;
+				std::vector<std::pair<shared_ptr<named_thread<spu_thread>>, u32>> paused_spus;
 
 				if (!try_lock_spu_threads_in_a_state_compatible_with_savestates(false, &paused_spus))
 				{
@@ -3076,7 +3188,7 @@ void Emulator::Kill(bool allow_autoexit, bool savestate, savestate_stage* save_s
 	{
 		// Show visual feedback to the user in case that stopping takes a while.
 		// This needs to be done before actually stopping, because otherwise the necessary threads will be terminated before we can show an image.
-		if (auto progress_dialog = g_fxo->try_get<named_thread<progress_dialog_server>>(); progress_dialog && g_progr.load())
+		if (auto progress_dialog = g_fxo->try_get<named_thread<progress_dialog_server>>(); progress_dialog && g_progr_text.operator bool())
 		{
 			// We are currently showing a progress dialog. Notify it that we are going to stop emulation.
 			g_system_progress_stopping = true;
@@ -3822,7 +3934,7 @@ s32 error_code::error_report(s32 result, const logs::message* channel, const cha
 
 void Emulator::ConfigurePPUCache() const
 {
-	auto& _main = g_fxo->get<main_ppu_module>();
+	auto& _main = g_fxo->get<main_ppu_module<lv2_obj>>();
 
 	_main.cache = rpcs3::utils::get_cache_dir(_main.path);
 
@@ -3897,25 +4009,43 @@ u32 Emulator::AddGamesFromDir(const std::string& path)
 		games_added++;
 	}
 
-	process_qt_events();
+	std::vector<fs::dir_entry> entries;
 
-	// search direct subdirectories, that way we can drop one folder containing all games
 	for (auto&& dir_entry : fs::dir(path))
 	{
-		if (!dir_entry.is_directory || dir_entry.name == "." || dir_entry.name == "..")
-		{
-			continue;
-		}
-
-		const std::string dir_path = path + '/' + dir_entry.name;
-
-		if (const game_boot_result error = AddGame(dir_path); error == game_boot_result::no_errors)
-		{
-			games_added++;
-		}
-
-		process_qt_events();
+		// Prefetch entries, it is unsafe to keep fs::dir for a long time or for many operations
+		entries.emplace_back(std::move(dir_entry));
 	}
+
+	auto path_it = entries.begin();
+
+	qt_events_aware_op(0, [&]()
+	{
+		// search direct subdirectories, that way we can drop one folder containing all games
+		for (; path_it != entries.end(); ++path_it)
+		{
+			auto dir_entry = std::move(*path_it);
+
+			if (!dir_entry.is_directory || dir_entry.name == "." || dir_entry.name == "..")
+			{
+				continue;
+			}
+
+			const std::string dir_path = path + '/' + dir_entry.name;
+
+			if (const game_boot_result error = AddGame(dir_path); error == game_boot_result::no_errors)
+			{
+				games_added++;
+			}
+
+			// Process events
+			++path_it;
+			return false;
+		}
+
+		// Exit loop
+		return true;
+	});
 
 	m_games_config.set_save_on_dirty(true);
 

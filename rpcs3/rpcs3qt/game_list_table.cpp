@@ -113,11 +113,11 @@ void game_list_table::adjust_icon_column()
 	resizeColumnToContents(static_cast<int>(gui::game_list_columns::count) - 1);
 }
 
-void game_list_table::sort(int game_count, int sort_column, Qt::SortOrder col_sort_order)
+void game_list_table::sort(usz game_count, int sort_column, Qt::SortOrder col_sort_order)
 {
 	// Back-up old header sizes to handle unwanted column resize in case of zero search results
 	const int old_row_count = rowCount();
-	const int old_game_count = game_count;
+	const usz old_game_count = game_count;
 
 	std::vector<int> column_widths(columnCount());
 	for (int i = 0; i < columnCount(); i++)
@@ -203,8 +203,8 @@ void game_list_table::set_custom_config_icon(const game_info& game)
 
 void game_list_table::populate(
 	const std::vector<game_info>& game_data,
-	const QMap<QString, QString>& notes_map,
-	const QMap<QString, QString>& title_map,
+	const std::map<QString, QString>& notes_map,
+	const std::map<QString, QString>& title_map,
 	const std::string& selected_item_id,
 	bool play_hover_movies)
 {
@@ -223,13 +223,22 @@ void game_list_table::populate(
 	int index = -1;
 	int selected_row = -1;
 
+	const auto get_title = [&title_map](const QString& serial, const std::string& name) -> QString
+	{
+		if (const auto it = title_map.find(serial); it != title_map.cend())
+		{
+			return it->second;
+		}
+
+		return QString::fromStdString(name);
+	};
+
 	for (const auto& game : game_data)
 	{
 		index++;
 
 		const QString serial = QString::fromStdString(game->info.serial);
-		const QString title = title_map.value(serial, QString::fromStdString(game->info.name));
-		const QString notes = notes_map.value(serial);
+		const QString title = get_title(serial, game->info.name);
 
 		// Icon
 		custom_table_widget_item* icon_item = new custom_table_widget_item;
@@ -302,9 +311,9 @@ void game_list_table::populate(
 		// Serial
 		custom_table_widget_item* serial_item = new custom_table_widget_item(game->info.serial);
 
-		if (!notes.isEmpty())
+		if (const auto it = notes_map.find(serial); it != notes_map.cend() && !it->second.isEmpty())
 		{
-			const QString tool_tip = tr("%0 [%1]\n\nNotes:\n%2").arg(title).arg(serial).arg(notes);
+			const QString tool_tip = tr("%0 [%1]\n\nNotes:\n%2").arg(title).arg(serial).arg(it->second);
 			title_item->setToolTip(tool_tip);
 			serial_item->setToolTip(tool_tip);
 		}
@@ -386,7 +395,7 @@ void game_list_table::populate(
 	selectRow(selected_row);
 }
 
-void game_list_table::repaint_icons(QList<game_info>& game_data, const QColor& icon_color, const QSize& icon_size, qreal device_pixel_ratio)
+void game_list_table::repaint_icons(std::vector<game_info>& game_data, const QColor& icon_color, const QSize& icon_size, qreal device_pixel_ratio)
 {
 	game_list_base::repaint_icons(game_data, icon_color, icon_size, device_pixel_ratio);
 	adjust_icon_column();

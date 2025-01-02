@@ -242,6 +242,7 @@
      <addaction name="confGHLtarAct"/>
      <addaction name="confTurntableAct"/>
      <addaction name="confUSIOAct"/>
+     <addaction name="confPSMoveAct"/>
      <addaction name="confPSMoveDS3Act"/>
      <addaction name="confGunCon3Act"/>
      <addaction name="confTopShotEliteAct"/>
@@ -261,6 +262,7 @@
     <addaction name="menuMice"/>
     <addaction name="menuEmulatedPads"/>
     <addaction name="confCamerasAct"/>
+    <addaction name="actionPS_Move_Tracker"/>
     <addaction name="confAudioAct"/>
     <addaction name="confIOAct"/>
     <addaction name="confSystemAct"/>
@@ -353,6 +355,7 @@
      <addaction name="showCatHomeAct"/>
      <addaction name="showCatAudioVideoAct"/>
      <addaction name="showCatGameDataAct"/>
+     <addaction name="showCatOSAct"/>
      <addaction name="showCatUnknownAct"/>
      <addaction name="showCatOtherAct"/>
     </widget>
@@ -881,18 +884,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>HDD Games</string>
    </property>
   </action>
   <action name="showCatDiscGameAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -903,18 +900,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>PS1 Games</string>
    </property>
   </action>
   <action name="showCatPS2GamesAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -925,18 +916,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>PSP Games</string>
    </property>
   </action>
   <action name="showCatHomeAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -947,9 +932,6 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>Audio/Video</string>
    </property>
@@ -958,18 +940,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>Game Data</string>
    </property>
   </action>
   <action name="showCatUnknownAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -1086,9 +1062,6 @@
   </action>
   <action name="showCatOtherAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -1388,6 +1361,24 @@
   <action name="toolsVfsDialogAct">
    <property name="text">
     <string>VFS Tool</string>
+   </property>
+  </action>
+  <action name="actionPS_Move_Tracker">
+   <property name="text">
+    <string>PS Move Tracker</string>
+   </property>
+  </action>
+  <action name="confPSMoveAct">
+   <property name="text">
+    <string>PS Move</string>
+   </property>
+  </action>
+  <action name="showCatOSAct">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Operating System</string>
    </property>
   </action>
  </widget>

@@ -3,6 +3,7 @@
 #include "Emu/IdManager.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"
+#include "Emu//Audio/audio_utils.h"
 #include "Emu//Cell/Modules/cellAudioOut.h"
 #include "util/video_provider.h"
 
@@ -164,7 +165,7 @@ error_code sys_rsxaudio_initialize(vm::ptr<u32> handle)
 		return CELL_ENOMEM;
 	}
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(id);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(id);
 	std::lock_guard lock(rsxaudio_obj->mutex);
 
 	rsxaudio_obj->shmem = vm::addr_t{vm::alloc(sizeof(rsxaudio_shmem), vm::main)};
@@ -201,7 +202,7 @@ error_code sys_rsxaudio_finalize(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_finalize(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -219,7 +220,7 @@ error_code sys_rsxaudio_finalize(u32 handle)
 
 	{
 		std::lock_guard ra_obj_lock{rsxaudio_thread.rsxaudio_obj_upd_m};
-		rsxaudio_thread.rsxaudio_obj_ptr = {};
+		rsxaudio_thread.rsxaudio_obj_ptr = null_ptr;
 	}
 
 	rsxaudio_obj->init = false;
@@ -235,7 +236,7 @@ error_code sys_rsxaudio_import_shared_memory(u32 handle, vm::ptr<u64> addr)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_import_shared_memory(handle=0x%x, addr=*0x%x)", handle, addr);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -264,7 +265,7 @@ error_code sys_rsxaudio_unimport_shared_memory(u32 handle, vm::ptr<u64> addr /* 
 {
 	sys_rsxaudio.trace("sys_rsxaudio_unimport_shared_memory(handle=0x%x, addr=*0x%x)", handle, addr);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -287,7 +288,7 @@ error_code sys_rsxaudio_create_connection(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_create_connection(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -305,15 +306,15 @@ error_code sys_rsxaudio_create_connection(u32 handle)
 
 	const error_code port_create_status = [&]() -> error_code
 	{
-		if (auto queue1 = idm::get<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_1_id))
+		if (auto queue1 = idm::get_unlocked<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_1_id))
 		{
 			rsxaudio_obj->event_queue[0] = queue1;
 
-			if (auto queue2 = idm::get<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_2_id))
+			if (auto queue2 = idm::get_unlocked<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_2_id))
 			{
 				rsxaudio_obj->event_queue[1] = queue2;
 
-				if (auto queue3 = idm::get<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_3_id))
+				if (auto queue3 = idm::get_unlocked<lv2_obj, lv2_event_queue>(sh_page->ctrl.event_queue_3_id))
 				{
 					rsxaudio_obj->event_queue[2] = queue3;
 
@@ -350,7 +351,7 @@ error_code sys_rsxaudio_close_connection(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_close_connection(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -367,7 +368,7 @@ error_code sys_rsxaudio_close_connection(u32 handle)
 	{
 		auto& rsxaudio_thread = g_fxo->get<rsx_audio_data>();
 		std::lock_guard ra_obj_lock{rsxaudio_thread.rsxaudio_obj_upd_m};
-		rsxaudio_thread.rsxaudio_obj_ptr = {};
+		rsxaudio_thread.rsxaudio_obj_ptr = null_ptr;
 	}
 
 	for (u32 q_idx = 0; q_idx < SYS_RSXAUDIO_PORT_CNT; q_idx++)
@@ -382,7 +383,7 @@ error_code sys_rsxaudio_prepare_process(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_prepare_process(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -413,7 +414,7 @@ error_code sys_rsxaudio_start_process(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_start_process(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -463,7 +464,7 @@ error_code sys_rsxaudio_stop_process(u32 handle)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_stop_process(handle=0x%x)", handle);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -511,7 +512,7 @@ error_code sys_rsxaudio_get_dma_param(u32 handle, u32 flag, vm::ptr<u64> out)
 {
 	sys_rsxaudio.trace("sys_rsxaudio_get_dma_param(handle=0x%x, flag=0x%x, out=0x%x)", handle, flag, out);
 
-	const auto rsxaudio_obj = idm::get<lv2_obj, lv2_rsxaudio>(handle);
+	const auto rsxaudio_obj = idm::get_unlocked<lv2_obj, lv2_rsxaudio>(handle);
 
 	if (!rsxaudio_obj)
 	{
@@ -1308,11 +1309,11 @@ rsxaudio_backend_thread::rsxaudio_backend_thread()
 {
 	new_emu_cfg = get_emu_cfg();
 
-	const u64 new_vol = g_cfg.audio.volume;
+	const f32 new_vol = audio::get_volume();
 
 	callback_cfg.atomic_op([&](callback_config& val)
 	{
-		val.target_volume = static_cast<u16>(new_vol / 100.0 * callback_config::VOL_NOMINAL);
+		val.target_volume = static_cast<u16>(new_vol * callback_config::VOL_NOMINAL);
 		val.initial_volume = val.current_volume;
 	});
 }
@@ -1332,11 +1333,11 @@ void rsxaudio_backend_thread::update_emu_cfg()
 {
 	std::unique_lock lock(state_update_m);
 	const emu_audio_cfg _new_emu_cfg = get_emu_cfg();
-	const u64 new_vol = g_cfg.audio.volume;
+	const f32 new_vol = audio::get_volume();
 
 	callback_cfg.atomic_op([&](callback_config& val)
 	{
-		val.target_volume = static_cast<u16>(new_vol / 100.0 * callback_config::VOL_NOMINAL);
+		val.target_volume = static_cast<u16>(new_vol * callback_config::VOL_NOMINAL);
 		val.initial_volume = val.current_volume;
 	});
 

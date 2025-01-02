@@ -64,7 +64,7 @@ void lv2_socket::set_poll_event(bs_t<lv2_socket::poll_t> event)
 	events += event;
 }
 
-void lv2_socket::poll_queue(std::shared_ptr<ppu_thread> ppu, bs_t<lv2_socket::poll_t> event, std::function<bool(bs_t<lv2_socket::poll_t>)> poll_cb)
+void lv2_socket::poll_queue(shared_ptr<ppu_thread> ppu, bs_t<lv2_socket::poll_t> event, std::function<bool(bs_t<lv2_socket::poll_t>)> poll_cb)
 {
 	set_poll_event(event);
 	queue.emplace_back(std::move(ppu), poll_cb);
@@ -165,13 +165,27 @@ void lv2_socket::queue_wake(ppu_thread* ppu)
 	{
 	case SYS_NET_SOCK_STREAM:
 	case SYS_NET_SOCK_DGRAM:
-		g_fxo->get<network_context>().ppu_to_awake.emplace_back(ppu);
+		g_fxo->get<network_context>().add_ppu_to_awake(ppu);
 		break;
 	case SYS_NET_SOCK_DGRAM_P2P:
 	case SYS_NET_SOCK_STREAM_P2P:
-		g_fxo->get<p2p_context>().ppu_to_awake.emplace_back(ppu);
+		g_fxo->get<p2p_context>().add_ppu_to_awake(ppu);
 		break;
 	default:
 		break;
 	}
+}
+
+lv2_socket& lv2_socket::operator=(thread_state s) noexcept
+{
+	if (s == thread_state::finished)
+	{
+		close();
+	}
+
+	return *this;
+}
+
+lv2_socket::~lv2_socket() noexcept
+{
 }

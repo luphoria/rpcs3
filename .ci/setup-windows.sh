@@ -11,9 +11,9 @@ PR_NUMBER="$SYSTEM_PULLREQUEST_PULLREQUESTID"
 QT_HOST="http://qt.mirror.constant.com/"
 QT_URL_VER=$(echo "$QT_VER" | sed "s/\.//g")
 QT_VER_MSVC_UP=$(echo "${QT_VER_MSVC}" | tr '[:lower:]' '[:upper:]')
-QT_PREFIX="online/qtsdkrepository/windows_x86/desktop/qt${QT_VER_MAIN}_${QT_URL_VER}/qt.qt${QT_VER_MAIN}.${QT_URL_VER}."
+QT_PREFIX="online/qtsdkrepository/windows_x86/desktop/qt${QT_VER_MAIN}_${QT_URL_VER}/qt${QT_VER_MAIN}_${QT_URL_VER}/qt.qt${QT_VER_MAIN}.${QT_URL_VER}."
 QT_PREFIX_2="win64_${QT_VER_MSVC}_64/${QT_VER}-0-${QT_DATE}"
-QT_SUFFIX="-Windows-Windows_10_22H2-${QT_VER_MSVC_UP}-Windows-Windows_10_22H2-X86_64.7z"
+QT_SUFFIX="-Windows-Windows_11_23H2-${QT_VER_MSVC_UP}-Windows-Windows_11_23H2-X86_64.7z"
 QT_BASE_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qtbase${QT_SUFFIX}"
 QT_DECL_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qtdeclarative${QT_SUFFIX}"
 QT_TOOL_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qttools${QT_SUFFIX}"
@@ -68,7 +68,7 @@ download_and_verify()
 }
 
 # Some dependencies install here
-[ -d "./lib" ] || mkdir "./lib"
+[ -d "./build/lib_ext/Release-x64" ] || mkdir -p "./build/lib_ext/Release-x64"
 
 for url in $DEP_URLS; do
     # Get the filename from the URL and remove query strings (?arg=something).
@@ -77,9 +77,9 @@ for url in $DEP_URLS; do
 
     # shellcheck disable=SC1003
     case "$url" in
-    *qt*) checksum=$(curl -fL "${url}.sha1"); algo="sha1"; outDir='C:\Qt\' ;;
-    *llvm*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./3rdparty/llvm" ;;
-    *glslang*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./lib/Release-x64" ;;
+    *qt*) checksum=$(curl -fL "${url}.sha1"); algo="sha1"; outDir="$QTDIR/" ;;
+    *llvm*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./build/lib_ext/Release-x64" ;;
+    *glslang*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./build/lib_ext/Release-x64" ;;
     *Vulkan*)
         # Vulkan setup needs to be run in batch environment
         # Need to subshell this or else it doesn't wait

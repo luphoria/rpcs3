@@ -4,6 +4,7 @@ add_library(rpcs3_emu STATIC
     IdManager.cpp
     localized_string.cpp
     savestate_utils.cpp
+    scoped_progress_dialog.cpp
     System.cpp
     system_config.cpp
     system_config_types.cpp
@@ -124,6 +125,7 @@ target_sources(rpcs3_emu PRIVATE
 # Audio
 target_sources(rpcs3_emu PRIVATE
     Audio/audio_resampler.cpp
+    Audio/audio_utils.cpp
     Audio/AudioDumper.cpp
     Audio/AudioBackend.cpp
     Audio/Cubeb/CubebBackend.cpp
@@ -251,6 +253,7 @@ target_sources(rpcs3_emu PRIVATE
     Cell/Modules/cellCrossController.cpp
     Cell/Modules/cellDaisy.cpp
     Cell/Modules/cellDmux.cpp
+    Cell/Modules/cellDmuxPamf.cpp
     Cell/Modules/cellDtcpIpUtility.cpp
     Cell/Modules/cellFiber.cpp
     Cell/Modules/cellFont.cpp
@@ -474,10 +477,12 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Common/TextureUtils.cpp
     RSX/Common/texture_cache.cpp
     RSX/Core/RSXContext.cpp
+    RSX/Core/RSXDrawCommands.cpp
     RSX/gcm_enums.cpp
     RSX/gcm_printing.cpp
     RSX/GL/GLCommonDecompiler.cpp
     RSX/GL/GLCompute.cpp
+    RSX/GL/GLDMA.cpp
     RSX/GL/GLDraw.cpp
     RSX/GL/GLFragmentProgram.cpp
     RSX/GL/GLGSRender.cpp
@@ -503,6 +508,8 @@ target_sources(rpcs3_emu PRIVATE
     RSX/GL/OpenGL.cpp
     RSX/GL/upscalers/fsr1/fsr_pass.cpp
     RSX/GSRender.cpp
+    RSX/Host/MM.cpp
+    RSX/Host/RSXDMAWriter.cpp
     RSX/Null/NullGSRender.cpp
     RSX/NV47/FW/draw_call.cpp
     RSX/NV47/FW/reg_context.cpp
@@ -519,8 +526,10 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Overlays/HomeMenu/overlay_home_menu_message_box.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_page.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_settings.cpp
+    RSX/Overlays/HomeMenu/overlay_home_menu_savestate.cpp
     RSX/Overlays/Network/overlay_recvmessage_dialog.cpp
     RSX/Overlays/Network/overlay_sendmessage_dialog.cpp
+    RSX/Overlays/Trophies/overlay_trophy_list_dialog.cpp
     RSX/Overlays/overlays.cpp
     RSX/Overlays/overlay_animated_icon.cpp
     RSX/Overlays/overlay_animation.cpp

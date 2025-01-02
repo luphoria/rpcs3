@@ -6,6 +6,8 @@
 #include "Emu/Memory/vm_locking.h"
 
 #include "Emu/Cell/PPUFunction.h"
+#include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/MFC.h"
 #include "sys_sync.h"
@@ -51,8 +53,10 @@
 #include "sys_uart.h"
 #include "sys_crypto_engine.h"
 
+#include <algorithm>
 #include <optional>
 #include <deque>
+#include <shared_mutex>
 #include "util/tsc.hpp"
 #include "util/sysinfo.hpp"
 #include "util/init_mutex.hpp"
@@ -73,6 +77,9 @@ namespace rsx
 {
 	void set_rsx_yield_flag() noexcept;
 }
+
+using spu_rdata_t = decltype(spu_thread::rdata);
+extern u32 compute_rdata_hash32(const spu_rdata_t& _src);
 
 template <>
 void fmt_class_string<ppu_syscall_code>::format(std::string& out, u64 arg)
@@ -1334,19 +1341,18 @@ bool lv2_obj::sleep(cpu_thread& cpu, const u64 timeout)
 		{
 			static_cast<ppu_thread&>(cpu).res_notify = 0;
 
-			if (static_cast<ppu_thread&>(cpu).res_notify_time != (vm::reservation_acquire(addr) & -128))
+			if (static_cast<ppu_thread&>(cpu).res_notify_time != vm::reservation_notifier_count_index(addr).second)
 			{
 				// Ignore outdated notification request
 			}
-			else if (usz notify_later_idx = std::basic_string_view<const void*>{g_to_notify, std::size(g_to_notify)}.find_first_of(std::add_pointer_t<const void>{});
-				notify_later_idx != umax)
+			else if (auto it = std::find(g_to_notify, std::end(g_to_notify), std::add_pointer_t<const void>{}); it != std::end(g_to_notify))
 			{
-				g_to_notify[notify_later_idx] = vm::reservation_notifier_notify(addr, true);
+				*it++ = vm::reservation_notifier_notify(addr, true);
 
-				if (notify_later_idx < std::size(g_to_notify) - 1)
+				if (it < std::end(g_to_notify))
 				{
 					// Null-terminate the list if it ends before last slot
-					g_to_notify[notify_later_idx + 1] = nullptr;
+					*it = nullptr;
 				}
 			}
 			else
@@ -1388,19 +1394,18 @@ bool lv2_obj::awake(cpu_thread* thread, s32 prio)
 		{
 			ppu->res_notify = 0;
 
-			if (ppu->res_notify_time != (vm::reservation_acquire(addr) & -128))
+			if (ppu->res_notify_time != vm::reservation_notifier_count_index(addr).second)
 			{
 				// Ignore outdated notification request
 			}
-			else if (usz notify_later_idx = std::basic_string_view<const void*>{g_to_notify, std::size(g_to_notify)}.find_first_of(std::add_pointer_t<const void>{});
-				notify_later_idx != umax)
+			else if (auto it = std::find(g_to_notify, std::end(g_to_notify), std::add_pointer_t<const void>{}); it != std::end(g_to_notify))
 			{
-				g_to_notify[notify_later_idx] = vm::reservation_notifier_notify(addr, true);
+				*it++ = vm::reservation_notifier_notify(addr, true);
 
-				if (notify_later_idx < std::size(g_to_notify) - 1)
+				if (it < std::end(g_to_notify))
 				{
 					// Null-terminate the list if it ends before last slot
-					g_to_notify[notify_later_idx + 1] = nullptr;
+					*it = nullptr;
 				}
 			}
 			else
@@ -1834,7 +1839,7 @@ void lv2_obj::cleanup()
 
 void lv2_obj::schedule_all(u64 current_time)
 {
-	usz notify_later_idx = std::basic_string_view<const void*>{g_to_notify, std::size(g_to_notify)}.find_first_of(std::add_pointer_t<const void>{});
+	auto it = std::find(g_to_notify, std::end(g_to_notify), std::add_pointer_t<const void>{});
 
 	if (!g_pending && g_scheduler_ready)
 	{
@@ -1852,19 +1857,19 @@ void lv2_obj::schedule_all(u64 current_time)
 
 				target->start_time = 0;
 
-				if ((target->state.fetch_op(FN(x += cpu_flag::signal, x -= cpu_flag::suspend, x-= remove_yield, void())) & (cpu_flag::wait + cpu_flag::signal)) != cpu_flag::wait)
+				if ((target->state.fetch_op(AOFN(x += cpu_flag::signal, x -= cpu_flag::suspend, x-= remove_yield, void())) & (cpu_flag::wait + cpu_flag::signal)) != cpu_flag::wait)
 				{
 					continue;
 				}
 
-				if (notify_later_idx >= std::size(g_to_notify))
+				if (it == std::end(g_to_notify))
 				{
 					// Out of notification slots, notify locally (resizable container is not worth it)
 					target->state.notify_one();
 				}
 				else
 				{
-					g_to_notify[notify_later_idx++] = &target->state;
+					*it++ = &target->state;
 				}
 			}
 		}
@@ -1891,14 +1896,14 @@ void lv2_obj::schedule_all(u64 current_time)
 				ensure(!target->state.test_and_set(cpu_flag::notify));
 
 				// Otherwise notify it to wake itself
-				if (notify_later_idx >= std::size(g_to_notify))
+				if (it == std::end(g_to_notify))
 				{
 					// Out of notification slots, notify locally (resizable container is not worth it)
 					target->state.notify_one();
 				}
 				else
 				{
-					g_to_notify[notify_later_idx++] = &target->state;
+					*it++ = &target->state;
 				}
 			}
 		}
@@ -1909,10 +1914,10 @@ void lv2_obj::schedule_all(u64 current_time)
 		}
 	}
 
-	if (notify_later_idx - 1 < std::size(g_to_notify) - 1)
+	if (it < std::end(g_to_notify))
 	{
 		// Null-terminate the list if it ends before last slot
-		g_to_notify[notify_later_idx] = nullptr;
+		*it = nullptr;
 	}
 
 	if (const u64 freq = s_yield_frequency)
@@ -2215,4 +2220,130 @@ void lv2_obj::prepare_for_sleep(cpu_thread& cpu)
 {
 	vm::temporary_unlock(cpu);
 	cpu_counter::remove(&cpu);
+}
+
+void lv2_obj::notify_all() noexcept
+{
+	for (auto cpu : g_to_notify)
+	{
+		if (!cpu)
+		{
+			break;
+		}
+
+		if (cpu != &g_to_notify)
+		{
+			const auto res_start = vm::reservation_notifier(0).second;
+			const auto res_end = vm::reservation_notifier(umax).second;
+
+			if (cpu >= res_start && cpu <= res_end)
+			{
+				atomic_wait_engine::notify_all(cpu);
+			}
+			else
+			{
+				// Note: by the time of notification the thread could have been deallocated which is why the direct function is used
+				atomic_wait_engine::notify_one(cpu);
+			}
+		}
+	}
+
+	g_to_notify[0] = nullptr;
+	g_postpone_notify_barrier = false;
+
+	const auto cpu = cpu_thread::get_current();
+
+	if (!cpu)
+	{
+		return;
+	}
+
+	if (cpu->get_class() != thread_class::spu && cpu->state.none_of(cpu_flag::suspend))
+	{
+		return;
+	}
+
+	std::optional<vm::writer_lock> lock;
+
+	constexpr usz total_waiters = std::size(spu_thread::g_spu_waiters_by_value);
+
+	u32 notifies[total_waiters]{};
+
+	// There may be 6 waiters, but checking them all may be performance expensive 
+	// Instead, check 2 at max, but use the CPU ID index to tell which index to start checking so the work would be distributed across all threads
+
+	atomic_t<u64, 64>* range_lock = nullptr;
+
+	for (usz i = 0, checked = 0; checked < 3 && i < total_waiters; i++)
+	{
+		auto& waiter = spu_thread::g_spu_waiters_by_value[(i + cpu->id) % total_waiters];
+		const u64 value = waiter.load();
+		u32 raddr = static_cast<u32>(value) & -128;
+
+		if (vm::check_addr(raddr))
+		{
+			if (((raddr >> 28) < 2 || (raddr >> 28) == 0xd))
+			{
+				checked++;
+
+				if (compute_rdata_hash32(*vm::get_super_ptr<spu_rdata_t>(raddr)) != static_cast<u32>(value >> 32))
+				{
+					// Clear address to avoid a race, keep waiter counter
+					if (waiter.fetch_op([&](u64& x)
+					{
+						if ((x & -128) == (value & -128))
+						{
+							x &= 127;
+							return true;
+						}
+
+						return false;
+					}).second)
+					{
+						notifies[i] = raddr;
+					}
+				}
+
+				continue;
+			}
+
+			if (!range_lock)
+			{
+				range_lock = vm::alloc_range_lock();
+			}
+
+			checked++;
+
+			if (spu_thread::reservation_check(raddr, static_cast<u32>(value >> 32), range_lock))
+			{
+				// Clear address to avoid a race, keep waiter counter
+				if (waiter.fetch_op([&](u64& x)
+				{
+					if ((x & -128) == (value & -128))
+					{
+						x &= 127;
+						return true;
+					}
+
+					return false;
+				}).second)
+				{
+					notifies[i] = raddr;
+				}
+			}
+		}
+	}
+
+	if (range_lock)
+	{
+		vm::free_range_lock(range_lock);
+	}
+
+	for (u32 addr : notifies)
+	{
+		if (addr)
+		{
+			vm::reservation_notifier_notify(addr);
+		}
+	}
 }

@@ -244,6 +244,13 @@ void VKGSRender::load_texture_env()
 		return false;
 	};
 
+	auto get_border_color = [&](const rsx::Texture auto& tex)
+	{
+		return  m_device->get_custom_border_color_support().require_border_color_remap
+			? tex.remapped_border_color()
+			: rsx::decode_border_color(tex.border_color());
+	};
+
 	std::lock_guard lock(m_sampler_mutex);
 
 	for (u32 textures_ref = current_fp_metadata.referenced_textures_mask, i = 0; textures_ref; textures_ref >>= 1, ++i)
@@ -304,10 +311,10 @@ void VKGSRender::load_texture_env()
 				const auto wrap_t = vk::vk_wrap_mode(tex.wrap_t());
 				const auto wrap_r = vk::vk_wrap_mode(tex.wrap_r());
 
-				// NOTE: In vulkan, the border color bypasses the swizzling defined in the image view.
-				// It is a direct texel replacement and must be remapped before attaching to the sampler.
+				// NOTE: In vulkan, the border color can bypass the sample swizzle stage.
+				// Check the device properties to determine whether to pre-swizzle the colors or not.
 				const auto border_color = rsx::is_border_clamped_texture(tex)
-					? vk::border_color_t(tex.remapped_border_color())
+					? vk::border_color_t(get_border_color(tex))
 					: vk::border_color_t(VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
 
 				// Check if non-point filtering can even be used on this format
@@ -449,10 +456,10 @@ void VKGSRender::load_texture_env()
 				const auto wrap_s = vk::vk_wrap_mode(tex.wrap_s());
 				const auto wrap_t = vk::vk_wrap_mode(tex.wrap_t());
 
-				// NOTE: In vulkan, the border color bypasses the swizzling defined in the image view.
-				// It is a direct texel replacement and must be remapped before attaching to the sampler.
+				// NOTE: In vulkan, the border color can bypass the sample swizzle stage.
+				// Check the device properties to determine whether to pre-swizzle the colors or not.
 				const auto border_color = is_border_clamped_texture(tex)
-					? vk::border_color_t(tex.remapped_border_color())
+					? vk::border_color_t(get_border_color(tex))
 					: vk::border_color_t(VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
 
 				if (vs_sampler_handles[i])
@@ -723,7 +730,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 	if (state_flags & rsx::vertex_arrays_changed)
 	{
-		analyse_inputs_interleaved(m_vertex_layout);
+		m_draw_processor.analyse_inputs_interleaved(m_vertex_layout, current_vp_metadata);
 	}
 	else if (state_flags & rsx::vertex_base_changed)
 	{
@@ -788,6 +795,16 @@ void VKGSRender::emit_geometry(u32 sub_index)
 				//rsx_log.error("Occlusion pool overflow");
 				if (m_current_task) m_current_task->result = 1;
 			}
+		}
+
+		// Before starting a query, we need to match RP scope (VK_1_0 rules).
+		// We always want our queries to start outside a renderpass whenever possible.
+		// We ignore this for performance reasons whenever possible of course and only do this for sensitive drivers.
+		if (vk::use_strict_query_scopes() &&
+			vk::is_renderpass_open(*m_current_command_buffer))
+		{
+			vk::end_renderpass(*m_current_command_buffer);
+			emergency_query_cleanup(m_current_command_buffer);
 		}
 
 		// Begin query
@@ -912,7 +929,11 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 	if (!upload_info.index_info)
 	{
-		if (draw_call.is_single_draw())
+		if (draw_call.is_trivial_instanced_draw)
+		{
+			vkCmdDraw(*m_current_command_buffer, upload_info.vertex_draw_count, draw_call.pass_count(), 0, 0);
+		}
+		else if (draw_call.is_single_draw())
 		{
 			vkCmdDraw(*m_current_command_buffer, upload_info.vertex_draw_count, 1, 0, 0);
 		}
@@ -934,10 +955,13 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 		vkCmdBindIndexBuffer(*m_current_command_buffer, m_index_buffer_ring_info.heap->value, offset, index_type);
 
-		if (rsx::method_registers.current_draw_clause.is_single_draw())
+		if (draw_call.is_trivial_instanced_draw)
 		{
-			const u32 index_count = upload_info.vertex_draw_count;
-			vkCmdDrawIndexed(*m_current_command_buffer, index_count, 1, 0, 0, 0);
+			vkCmdDrawIndexed(*m_current_command_buffer, upload_info.vertex_draw_count, draw_call.pass_count(), 0, 0, 0);
+		}
+		else if (rsx::method_registers.current_draw_clause.is_single_draw())
+		{
+			vkCmdDrawIndexed(*m_current_command_buffer, upload_info.vertex_draw_count, 1, 0, 0, 0);
 		}
 		else
 		{
@@ -1035,7 +1059,10 @@ void VKGSRender::end()
 	m_frame_stats.setup_time += m_profiler.duration();
 
 	// Apply write memory barriers
-	if (auto ds = std::get<1>(m_rtts.m_bound_depth_stencil)) ds->write_barrier(*m_current_command_buffer);
+	if (auto ds = std::get<1>(m_rtts.m_bound_depth_stencil))
+	{
+		ds->write_barrier(*m_current_command_buffer);
+	}
 
 	for (auto &rtt : m_rtts.m_bound_render_targets)
 	{
@@ -1094,12 +1121,19 @@ void VKGSRender::end()
 		m_current_command_buffer->flags |= vk::command_buffer::cb_reload_dynamic_state;
 	}
 
-	rsx::method_registers.current_draw_clause.begin();
+	auto& draw_call = rsx::method_registers.current_draw_clause;
+	draw_call.begin();
 	do
 	{
 		emit_geometry(sub_index++);
+
+		if (draw_call.is_trivial_instanced_draw)
+		{
+			// We already completed. End the draw.
+			draw_call.end();
+		}
 	}
-	while (rsx::method_registers.current_draw_clause.next());
+	while (draw_call.next());
 
 	if (m_current_command_buffer->flags & vk::command_buffer::cb_has_conditional_render)
 	{

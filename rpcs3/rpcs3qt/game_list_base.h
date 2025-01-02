@@ -34,8 +34,8 @@ public:
 	virtual void clear_list(){};
 	virtual void populate(
 		[[maybe_unused]] const std::vector<game_info>& game_data,
-		[[maybe_unused]] const QMap<QString, QString>& notes_map,
-		[[maybe_unused]] const QMap<QString, QString>& title_map,
+		[[maybe_unused]] const std::map<QString, QString>& notes_map,
+		[[maybe_unused]] const std::map<QString, QString>& title_map,
 		[[maybe_unused]] const std::string& selected_item_id,
 		[[maybe_unused]] bool play_hover_movies){};
 
@@ -43,7 +43,7 @@ public:
 	void set_icon_color(QColor color) { m_icon_color = std::move(color); }
 	void set_draw_compat_status_to_grid(bool enabled) { m_draw_compat_status_to_grid = enabled; }
 
-	virtual void repaint_icons(QList<game_info>& game_data, const QColor& icon_color, const QSize& icon_size, qreal device_pixel_ratio);
+	virtual void repaint_icons(std::vector<game_info>& game_data, const QColor& icon_color, const QSize& icon_size, qreal device_pixel_ratio);
 
 	// Returns the visible version string in the game list
 	static std::string GetGameVersion(const game_info& game);

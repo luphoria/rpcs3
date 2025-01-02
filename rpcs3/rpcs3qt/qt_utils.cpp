@@ -501,10 +501,8 @@ namespace gui
 			return nullptr;
 		}
 
-		QList<QTreeWidgetItem*> find_children_by_data(QTreeWidgetItem* parent, const QList<QPair<int /*role*/, QVariant /*data*/>>& criteria, bool recursive)
+		void find_children_by_data(QTreeWidgetItem* parent, std::vector<QTreeWidgetItem*>& children, const std::vector<std::pair<int /*role*/, QVariant /*data*/>>& criteria, bool recursive)
 		{
-			QList<QTreeWidgetItem*> list;
-
 			if (parent)
 			{
 				for (int i = 0; i < parent->childCount(); i++)
@@ -524,18 +522,16 @@ namespace gui
 
 						if (match)
 						{
-							list << item;
+							children.push_back(item);
 						}
 
 						if (recursive)
 						{
-							list << find_children_by_data(item, criteria, recursive);
+							find_children_by_data(item, children, criteria, recursive);
 						}
 					}
 				}
 			}
-
-			return list;
 		}
 
 		QTreeWidgetItem* add_child(QTreeWidgetItem *parent, const QString& text, int column)
@@ -561,7 +557,7 @@ namespace gui
 			}
 		}
 
-		void remove_children(QTreeWidgetItem* parent, const QList<QPair<int /*role*/, QVariant /*data*/>>& criteria, bool recursive)
+		void remove_children(QTreeWidgetItem* parent, const std::vector<std::pair<int /*role*/, QVariant /*data*/>>& criteria, bool recursive)
 		{
 			if (parent)
 			{
@@ -629,13 +625,18 @@ namespace gui
 		{
 			usz byte_unit = 0;
 			usz divisor = 1;
+#if defined(__APPLE__)
+			constexpr usz multiplier = 1000; 
+			static const QString s_units[]{"B", "kB", "MB", "GB", "TB", "PB"};
+#else
+			constexpr usz multiplier = 1024;
+			static const QString s_units[]{"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+#endif
 
-			static const QString s_units[]{"B", "KB", "MB", "GB", "TB", "PB"};
-
-			while (byte_unit < std::size(s_units) - 1 && size / divisor >= 1024)
+			while (byte_unit < std::size(s_units) - 1 && size / divisor >= multiplier)
 			{
 				byte_unit++;
-				divisor *= 1024;
+				divisor *= multiplier;
 			}
 
 			return QStringLiteral("%0 %1").arg(QString::number((size + 0.) / divisor, 'f', 2)).arg(s_units[byte_unit]);

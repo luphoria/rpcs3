@@ -9,15 +9,15 @@ brew install -f --overwrite nasm ninja p7zip ccache pipenv #create-dmg
 #/usr/sbin/softwareupdate --install-rosetta --agree-to-license
 arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 arch -x86_64 /usr/local/bin/brew update
-arch -x86_64 /usr/local/bin/brew install -f --overwrite python@3.12 || arch -x86_64 /usr/local/bin/brew link --overwrite python@3.12
+arch -x86_64 /usr/local/bin/brew install -f --overwrite python || arch -x86_64 /usr/local/bin/brew link --overwrite python
 arch -x86_64 /usr/local/bin/brew uninstall -f --ignore-dependencies ffmpeg
 arch -x86_64 /usr/local/bin/brew install -f --build-from-source ffmpeg@5
 arch -x86_64 /usr/local/bin/brew reinstall -f --build-from-source gnutls freetype
 arch -x86_64 /usr/local/bin/brew install llvm@$LLVM_COMPILER_VER glew cmake sdl2 vulkan-headers coreutils
 arch -x86_64 /usr/local/bin/brew link -f llvm@$LLVM_COMPILER_VER ffmpeg@5
 
-# moltenvk based on commit for 1.2.10 release
-wget https://raw.githubusercontent.com/Homebrew/homebrew-core/0d9f25fbd1658e975d00bd0e8cccd20a0c2cb74b/Formula/m/molten-vk.rb
+# moltenvk based on commit for 1.2.11 release
+wget https://raw.githubusercontent.com/Homebrew/homebrew-core/6bfc8950c696d1f952425e8af2a6248603dc0df9/Formula/m/molten-vk.rb
 arch -x86_64 /usr/local/bin/brew install -f --overwrite ./molten-vk.rb
 export CXX=clang++
 export CC=clang
@@ -39,10 +39,14 @@ if [ ! -d "/tmp/Qt/$QT_VER" ]; then
   git clone https://github.com/engnr/qt-downloader.git
   cd qt-downloader
   git checkout f52efee0f18668c6d6de2dec0234b8c4bc54c597
+  # nested Qt 6.8.1 URL workaround
+  # sed -i '' "s/'qt{0}_{0}{1}{2}'.format(major, minor, patch)]))/'qt{0}_{0}{1}{2}'.format(major, minor, patch), 'qt{0}_{0}{1}{2}'.format(major, minor, patch)]))/g" qt-downloader
+  # sed -i '' "s/'{}\/{}\/qt{}_{}\/'/'{0}\/{1}\/qt{2}_{3}\/qt{2}_{3}\/'/g" qt-downloader
   cd "/tmp/Qt"
   "$BREW_X64_PATH/bin/pipenv" run pip3 install py7zr requests semantic_version lxml
   mkdir -p "$QT_VER/macos" ; ln -s "macos" "$QT_VER/clang_64"
-  "$BREW_X64_PATH/bin/pipenv" run "$WORKDIR/qt-downloader/qt-downloader" macos desktop "$QT_VER" clang_64 --opensource --addons qtmultimedia qtimageformats
+  # sed -i '' 's/args\.version \/ derive_toolchain_dir(args) \/ //g' "$WORKDIR/qt-downloader/qt-downloader" # Qt 6.8.1 workaround
+  "$BREW_X64_PATH/bin/pipenv" run "$WORKDIR/qt-downloader/qt-downloader" macos desktop "$QT_VER" clang_64 --opensource --addons qtmultimedia qtimageformats # -o "$QT_VER/clang_64"
 fi
 
 cd "$WORKDIR"
@@ -65,9 +69,9 @@ export VK_ICD_FILENAMES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
 
 export LLVM_DIR
 LLVM_DIR="BREW_X64_PATH/opt/llvm@$LLVM_COMPILER_VER"
-# exclude ffmpeg, LLVM, and sdl from submodule update
+# exclude ffmpeg, LLVM, opencv, and sdl from submodule update
 # shellcheck disable=SC2046
-git submodule -q update --init --depth=1 --jobs=8 $(awk '/path/ && !/ffmpeg/ && !/llvm/ && !/SDL/ { print $3 }' .gitmodules)
+git submodule -q update --init --depth=1 --jobs=8 $(awk '/path/ && !/ffmpeg/ && !/llvm/ && !/opencv/ && !/SDL/ { print $3 }' .gitmodules)
 
 # 3rdparty fixes
 sed -i '' "s/extern const double NSAppKitVersionNumber;/const double NSAppKitVersionNumber = 1343;/g" 3rdparty/hidapi/hidapi/mac/hid.c
@@ -98,6 +102,7 @@ export MACOSX_DEPLOYMENT_TARGET=13.0
     -DUSE_SYSTEM_MVK=ON \
     -DUSE_SYSTEM_FAUDIO=OFF \
     -DUSE_SYSTEM_SDL=ON \
+    -DUSE_SYSTEM_OPENCV=ON \
     $CMAKE_EXTRA_OPTS \
     -DLLVM_TARGET_ARCH=X86_64 \
     -DCMAKE_OSX_ARCHITECTURES=x86_64 \

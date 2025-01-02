@@ -300,7 +300,7 @@ namespace gl
 
 			m_src = fmt::replace_all(m_src, syntax_replace);
 
-			param_buffer.create(gl::buffer::target::uniform, 32, nullptr, gl::buffer::memory_type::local, GL_DYNAMIC_COPY);
+			param_buffer.create(gl::buffer::target::uniform, 32, nullptr, gl::buffer::memory_type::local, gl::buffer::usage::dynamic_update);
 		}
 
 		~cs_deswizzle_3d()
@@ -381,7 +381,7 @@ namespace gl
 	template<class T>
 	T* get_compute_task()
 	{
-		u32 index = id_manager::typeinfo::get_index<T>();
+		u32 index = stx::typeindex<id_manager::typeinfo, T>();
 		auto &e = g_compute_tasks[index];
 
 		if (!e)

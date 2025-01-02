@@ -54,20 +54,20 @@
 flow_layout::flow_layout(QWidget* parent, int margin, bool dynamic_spacing, int hSpacing, int vSpacing)
 	: QLayout(parent)
 	, m_dynamic_spacing(dynamic_spacing)
-	, m_hSpaceInitial(hSpacing)
-	, m_vSpaceInitial(vSpacing)
-	, m_hSpace(hSpacing)
-	, m_vSpace(vSpacing)
+	, m_h_space_initial(hSpacing)
+	, m_v_space_initial(vSpacing)
+	, m_h_space(hSpacing)
+	, m_v_space(vSpacing)
 {
 	setContentsMargins(margin, margin, margin, margin);
 }
 
 flow_layout::flow_layout(int margin, bool dynamic_spacing, int hSpacing, int vSpacing)
 	: m_dynamic_spacing(dynamic_spacing)
-	, m_hSpaceInitial(hSpacing)
-	, m_vSpaceInitial(vSpacing)
-	, m_hSpace(hSpacing)
-	, m_vSpace(vSpacing)
+	, m_h_space_initial(hSpacing)
+	, m_v_space_initial(vSpacing)
+	, m_h_space(hSpacing)
+	, m_v_space(vSpacing)
 {
 	setContentsMargins(margin, margin, margin, margin);
 }
@@ -79,26 +79,30 @@ flow_layout::~flow_layout()
 
 void flow_layout::clear()
 {
+	// We can't use a ranged loop here, since deleting the widget will call takeAt on the layout. So let's also use takeAt.
 	while (QLayoutItem* item = takeAt(0))
 	{
-		delete item->widget();
-		delete item;
+		if (item)
+		{
+			delete item->widget();
+			delete item;
+		}
 	}
-	itemList.clear();
+	m_item_list.clear();
 	m_positions.clear();
 }
 
 void flow_layout::addItem(QLayoutItem* item)
 {
 	m_positions.append(position{ .row = -1, .col = -1 });
-	itemList.append(item);
+	m_item_list.append(item);
 }
 
 int flow_layout::horizontalSpacing() const
 {
-	if (m_hSpace >= 0)
+	if (m_h_space >= 0)
 	{
-		return m_hSpace;
+		return m_h_space;
 	}
 
 	return smartSpacing(QStyle::PM_LayoutHorizontalSpacing);
@@ -106,9 +110,9 @@ int flow_layout::horizontalSpacing() const
 
 int flow_layout::verticalSpacing() const
 {
-	if (m_vSpace >= 0)
+	if (m_v_space >= 0)
 	{
-		return m_vSpace;
+		return m_v_space;
 	}
 
 	return smartSpacing(QStyle::PM_LayoutVerticalSpacing);
@@ -116,20 +120,20 @@ int flow_layout::verticalSpacing() const
 
 int flow_layout::count() const
 {
-	return itemList.size();
+	return m_item_list.size();
 }
 
 QLayoutItem* flow_layout::itemAt(int index) const
 {
-	return itemList.value(index);
+	return m_item_list.value(index);
 }
 
 QLayoutItem* flow_layout::takeAt(int index)
 {
-	if (index >= 0 && index < itemList.size())
+	if (index >= 0 && index < m_item_list.size())
 	{
 		m_positions.takeAt(index);
-		return itemList.takeAt(index);
+		return m_item_list.takeAt(index);
 	}
 
 	return nullptr;
@@ -164,7 +168,7 @@ QSize flow_layout::sizeHint() const
 QSize flow_layout::minimumSize() const
 {
 	QSize size;
-	for (const QLayoutItem* item : itemList)
+	for (const QLayoutItem* item : m_item_list)
 	{
 		if (item)
 		{
@@ -185,8 +189,8 @@ int flow_layout::doLayout(const QRect& rect, bool testOnly) const
 	int x = effectiveRect.x();
 	int y = effectiveRect.y();
 	int lineHeight = 0;
-	int rows = 0;
-	int cols = 0;
+	int row_count = 0;
+	int col_count = 0;
 
 	if (m_dynamic_spacing)
 	{
@@ -196,9 +200,9 @@ int flow_layout::doLayout(const QRect& rect, bool testOnly) const
 		int width = 0;
 		int index = 0;
 
-		for (; index < itemList.size(); index++)
+		for (; index < m_item_list.size(); index++)
 		{
-			if (QLayoutItem* item = itemList.at(index))
+			if (QLayoutItem* item = m_item_list.at(index))
 			{
 				const int new_width = width + item->sizeHint().width() + (width > 0 ? min_spacing : 0);
 
@@ -213,22 +217,22 @@ int flow_layout::doLayout(const QRect& rect, bool testOnly) const
 		}
 
 		// Try to evenly distribute the items across the width
-		m_hSpace = (index == 0) ? -1 : ((available_width - width) / index);
+		m_h_space = (index == 0) ? -1 : ((available_width - width) / index);
 
 		if (fits_into_width)
 		{
 			// Make sure there aren't huge gaps between the items
-			m_hSpace = smartSpacing(QStyle::PM_LayoutHorizontalSpacing);
+			m_h_space = smartSpacing(QStyle::PM_LayoutHorizontalSpacing);
 		}
 	}
 	else
 	{
-		m_hSpace = m_hSpaceInitial;
+		m_h_space = m_h_space_initial;
 	}
 
-	for (int i = 0, row = 0, col = 0; i < itemList.size(); i++)
+	for (int i = 0, row = 0, col = 0; i < m_item_list.size(); i++)
 	{
-		QLayoutItem* item = itemList.at(i);
+		QLayoutItem* item = m_item_list.at(i);
 		if (!item)
 			continue;
 
@@ -259,8 +263,8 @@ int flow_layout::doLayout(const QRect& rect, bool testOnly) const
 		pos.row = row;
 		pos.col = col++;
 
-		rows = std::max(rows, pos.row + 1);
-		cols = std::max(cols, pos.col + 1);
+		row_count = std::max(row_count, pos.row + 1);
+		col_count = std::max(col_count, pos.col + 1);
 
 		if (!testOnly)
 			item->setGeometry(QRect(QPoint(x, y), item->sizeHint()));
@@ -269,8 +273,8 @@ int flow_layout::doLayout(const QRect& rect, bool testOnly) const
 		lineHeight = qMax(lineHeight, item->sizeHint().height());
 	}
 
-	m_rows = rows;
-	m_cols = cols;
+	m_rows = row_count;
+	m_cols = col_count;
 
 	return y + lineHeight - rect.y() + bottom;
 }

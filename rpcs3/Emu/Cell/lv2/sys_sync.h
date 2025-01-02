@@ -6,8 +6,11 @@
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/timers.hpp"
+#include "Emu/Memory/vm_reservation.h"
 #include "Emu/IdManager.h"
 #include "Emu/IPC.h"
+
+#include "util/shared_ptr.hpp"
 
 #include <thread>
 
@@ -66,11 +69,6 @@ struct ppu_non_sleeping_count_t
 	u32 onproc_count;
 };
 
-namespace vm
-{
-	extern u8 g_reservations[65536 / 128 * 64];
-}
-
 // Base class for some kernel objects (shared set of 8192 objects).
 struct lv2_obj
 {
@@ -97,7 +95,9 @@ public:
 
 	lv2_obj() noexcept = default;
 	lv2_obj(u32 i) noexcept : exists{ i } {}
+	lv2_obj(lv2_obj&& rhs) noexcept : exists{ +rhs.exists } {}
 	lv2_obj(utils::serial&) noexcept {}
+	lv2_obj& operator=(lv2_obj&& rhs) noexcept { exists = +rhs.exists; return *this; }
 	void save(utils::serial&) {}
 
 	// Existence validation (workaround for shared-ptr ref-counting)
@@ -348,11 +348,11 @@ public:
 		// EAGAIN for IDM IDs shortage
 		CellError error = CELL_EAGAIN;
 
-		if (!idm::import<lv2_obj, T>([&]() -> std::shared_ptr<T>
+		if (!idm::import<lv2_obj, T>([&]() -> shared_ptr<T>
 		{
-			std::shared_ptr<T> result = make();
+			shared_ptr<T> result = make();
 
-			auto finalize_construct = [&]() -> std::shared_ptr<T>
+			auto finalize_construct = [&]() -> shared_ptr<T>
 			{
 				if ((error = result->on_id_create()))
 				{
@@ -413,7 +413,7 @@ public:
 	}
 
 	template <typename T>
-	static void on_id_destroy(T& obj, u64 ipc_key, u64 pshared = -1)
+	static void on_id_destroy(T& obj, u64 ipc_key, u64 pshared = umax)
 	{
 		if (pshared == umax)
 		{
@@ -428,16 +428,16 @@ public:
 	}
 
 	template <typename T>
-	static std::shared_ptr<T> load(u64 ipc_key, std::shared_ptr<T> make, u64 pshared = -1)
+	static shared_ptr<T> load(u64 ipc_key, shared_ptr<T> make, u64 pshared = umax)
 	{
 		if (pshared == umax ? ipc_key != 0 : pshared != 0)
 		{
 			g_fxo->need<ipc_manager<T, u64>>();
 
-			make = g_fxo->get<ipc_manager<T, u64>>().add(ipc_key, [&]()
+			g_fxo->get<ipc_manager<T, u64>>().add(ipc_key, [&]()
 			{
 				return make;
-			}, true).second;
+			});
 		}
 
 		// Ensure no error
@@ -445,34 +445,16 @@ public:
 		return make;
 	}
 
+	template <typename T, typename Storage = lv2_obj>
+	static std::function<void(void*)> load_func(shared_ptr<T> make, u64 pshared = umax)
+	{
+		const u64 key = make->key;
+		return [ptr = load<T>(key, make, pshared)](void* storage) { *static_cast<shared_ptr<Storage>*>(storage) = ptr; };
+	}
+
 	static bool wait_timeout(u64 usec, ppu_thread* cpu = {}, bool scale = true, bool is_usleep = false);
 
-	static inline void notify_all()
-	{
-		for (auto cpu : g_to_notify)
-		{
-			if (!cpu)
-			{
-				break;
-			}
-
-			if (cpu != &g_to_notify)
-			{
-				if (cpu >= vm::g_reservations && cpu <= vm::g_reservations + (std::size(vm::g_reservations) - 1))
-				{
-					atomic_wait_engine::notify_all(cpu);
-				}
-				else
-				{
-					// Note: by the time of notification the thread could have been deallocated which is why the direct function is used
-					atomic_wait_engine::notify_one(cpu);
-				}
-			}
-		}
-
-		g_to_notify[0] = nullptr;
-		g_postpone_notify_barrier = false;
-	}
+	static void notify_all() noexcept;
 
 	// Can be called before the actual sleep call in order to move it out of mutex scope
 	static void prepare_for_sleep(cpu_thread& cpu);

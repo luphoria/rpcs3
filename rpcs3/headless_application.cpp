@@ -155,12 +155,13 @@ void headless_application::InitializeCallbacks()
 	callbacks.enable_disc_eject  = [](bool) {};
 	callbacks.enable_disc_insert = [](bool) {};
 
-	callbacks.on_missing_fw = []() { return false; };
+	callbacks.on_missing_fw = []() {};
 
 	callbacks.handle_taskbar_progress = [](s32, s32) {};
 
 	callbacks.get_localized_string    = [](localized_string_id, const char*) -> std::string { return {}; };
 	callbacks.get_localized_u32string = [](localized_string_id, const char*) -> std::u32string { return {}; };
+	callbacks.get_localized_setting   = [](const cfg::_base*, u32) -> std::string { return {}; };
 
 	callbacks.play_sound = [](const std::string&){};
 	callbacks.add_breakpoint = [](u32 /*addr*/){};

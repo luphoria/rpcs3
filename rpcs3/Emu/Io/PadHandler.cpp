@@ -247,6 +247,19 @@ PadHandlerBase::connection PadHandlerBase::get_next_button_press(const std::stri
 		return status;
 	}
 
+	if (m_type == pad_handler::move)
+	{
+		// Keep the pad cached to reduce expensive one time requests
+		if (!m_pad_for_pad_settings || m_pad_for_pad_settings->m_pad_handler != m_type)
+		{
+			m_pad_for_pad_settings = std::make_shared<Pad>(m_type, 0, 0, 0, 0);
+		}
+
+		// Get extended device ID
+		pad_ensemble binding{m_pad_for_pad_settings, device, nullptr};
+		get_extended_info(binding);
+	}
+
 	// Get the current button values
 	auto data = get_button_values(device);
 
@@ -348,15 +361,19 @@ void PadHandlerBase::get_motion_sensors(const std::string& pad_id, const motion_
 		return;
 	}
 
+	// Keep the pad cached to reduce expensive one time requests
+	if (!m_pad_for_pad_settings || m_pad_for_pad_settings->m_pad_handler != m_type)
+	{
+		m_pad_for_pad_settings = std::make_shared<Pad>(m_type, 0, 0, 0, 0);
+	}
+
 	// Get the current motion values
-	std::shared_ptr<Pad> pad = std::make_shared<Pad>(m_type, 0, 0, 0, 0);
-	pad->m_sensors.resize(preview_values.size(), AnalogSensor(0, 0, 0, 0, 0));
-	pad_ensemble binding{pad, device, nullptr};
+	pad_ensemble binding{m_pad_for_pad_settings, device, nullptr};
 	get_extended_info(binding);
 
 	for (usz i = 0; i < preview_values.size(); i++)
 	{
-		preview_values[i] = pad->m_sensors[i].m_value;
+		preview_values[i] = m_pad_for_pad_settings->m_sensors[i].m_value;
 	}
 
 	callback(pad_id, std::move(preview_values));
@@ -505,18 +522,18 @@ bool PadHandlerBase::bindPadToDevice(std::shared_ptr<Pad> pad)
 		pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_PRESS_PIGGYBACK, mapping[button::skateboard_tilt_right], CELL_PAD_CTRL_PRESS_R1);
 	}
 
-	pad->m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_X, mapping[button::ls_left], mapping[button::ls_right]);
-	pad->m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_Y, mapping[button::ls_down], mapping[button::ls_up]);
-	pad->m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X, mapping[button::rs_left], mapping[button::rs_right]);
-	pad->m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_Y, mapping[button::rs_down], mapping[button::rs_up]);
+	pad->m_sticks[0] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_X, mapping[button::ls_left], mapping[button::ls_right]);
+	pad->m_sticks[1] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_Y, mapping[button::ls_down], mapping[button::ls_up]);
+	pad->m_sticks[2] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X, mapping[button::rs_left], mapping[button::rs_right]);
+	pad->m_sticks[3] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_Y, mapping[button::rs_down], mapping[button::rs_up]);
 
-	pad->m_sensors.emplace_back(CELL_PAD_BTN_OFFSET_SENSOR_X, 0, 0, 0, DEFAULT_MOTION_X);
-	pad->m_sensors.emplace_back(CELL_PAD_BTN_OFFSET_SENSOR_Y, 0, 0, 0, DEFAULT_MOTION_Y);
-	pad->m_sensors.emplace_back(CELL_PAD_BTN_OFFSET_SENSOR_Z, 0, 0, 0, DEFAULT_MOTION_Z);
-	pad->m_sensors.emplace_back(CELL_PAD_BTN_OFFSET_SENSOR_G, 0, 0, 0, DEFAULT_MOTION_G);
+	pad->m_sensors[0] = AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_X, 0, 0, 0, DEFAULT_MOTION_X);
+	pad->m_sensors[1] = AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_Y, 0, 0, 0, DEFAULT_MOTION_Y);
+	pad->m_sensors[2] = AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_Z, 0, 0, 0, DEFAULT_MOTION_Z);
+	pad->m_sensors[3] = AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_G, 0, 0, 0, DEFAULT_MOTION_G);
 
-	pad->m_vibrateMotors.emplace_back(true, 0);
-	pad->m_vibrateMotors.emplace_back(false, 0);
+	pad->m_vibrateMotors[0] = VibrateMotor(true, 0);
+	pad->m_vibrateMotors[1] = VibrateMotor(false, 0);
 
 	m_bindings.emplace_back(pad, pad_device, nullptr);
 

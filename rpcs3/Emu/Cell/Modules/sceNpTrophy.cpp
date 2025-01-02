@@ -17,9 +17,10 @@
 #include "Utilities/StrUtil.h"
 
 #include "Emu/Cell/lv2/sys_event.h"
-#include "Emu/Cell/lv2/sys_process.h"
 #include "Emu/Cell/lv2/sys_fs.h"
 
+#include <algorithm>
+#include <functional>
 #include <shared_mutex>
 #include "util/asm.hpp"
 
@@ -122,7 +123,7 @@ struct sce_np_trophy_manager
 			return res;
 		}
 
-		ctxt = idm::check<trophy_context_t>(context);
+		ctxt = idm::check_unlocked<trophy_context_t>(context);
 
 		if (!ctxt)
 		{
@@ -143,7 +144,7 @@ struct sce_np_trophy_manager
 			return res;
 		}
 
-		const auto hndl = idm::check<trophy_handle_t>(handle);
+		const auto hndl = idm::check_unlocked<trophy_handle_t>(handle);
 
 		if (!hndl)
 		{
@@ -408,7 +409,7 @@ error_code sceNpTrophyAbortHandle(u32 handle)
 		return SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT;
 	}
 
-	const auto hndl = idm::check<trophy_handle_t>(handle);
+	const auto hndl = idm::check_unlocked<trophy_handle_t>(handle);
 
 	if (!hndl)
 	{
@@ -479,7 +480,7 @@ error_code sceNpTrophyCreateContext(vm::ptr<u32> context, vm::cptr<SceNpCommunic
 		return SCE_NP_TROPHY_ERROR_INVALID_NP_COMM_ID;
 	}
 
-	if (std::basic_string_view<u8>(&commSign_data.data[6], 6).find_first_not_of('\0') != umax)
+	if (std::any_of(&commSign_data.data[6], &commSign_data.data[6] + 6, FN(x != '\0')))
 	{
 		// 6 padding bytes - must be 0
 		return SCE_NP_TROPHY_ERROR_INVALID_NP_COMM_ID;
@@ -503,9 +504,16 @@ error_code sceNpTrophyCreateContext(vm::ptr<u32> context, vm::cptr<SceNpCommunic
 	}
 
 	// set trophy context parameters (could be passed to constructor through make_ptr call)
-	ctxt->trp_name = std::move(name);
+	ctxt->trp_name = name;
 	ctxt->read_only = !!(options & SCE_NP_TROPHY_OPTIONS_CREATE_CONTEXT_READ_ONLY);
 	*context = idm::last_id();
+
+	// set current trophy name for trophy list overlay
+	{
+		current_trophy_name& current_id = g_fxo->get<current_trophy_name>();
+		std::lock_guard lock(current_id.mtx);
+		current_id.name = std::move(name);
+	}
 
 	return CELL_OK;
 }
@@ -551,7 +559,7 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	}
 
 	const auto [ctxt, error] = trophy_manager.get_context_ex(context, handle, true);
-	const auto handle_ptr = idm::get<trophy_handle_t>(handle);
+	const auto handle_ptr = idm::get_unlocked<trophy_handle_t>(handle);
 
 	if (error)
 	{
@@ -640,7 +648,7 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 		return SCE_NP_TROPHY_ERROR_UNKNOWN_CONTEXT;
 	}
 
-	if (handle_ptr.get() != idm::check<trophy_handle_t>(handle))
+	if (handle_ptr.get() != idm::check_unlocked<trophy_handle_t>(handle))
 	{
 		on_error();
 		return SCE_NP_TROPHY_ERROR_UNKNOWN_HANDLE;
@@ -715,7 +723,6 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 
 	// Create a counter which is destroyed after the function ends
 	const auto queued = std::make_shared<atomic_t<u32>>(0);
-	std::weak_ptr<atomic_t<u32>> wkptr = queued;
 
 	for (auto status : statuses)
 	{
@@ -723,12 +730,11 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 		*queued += status.second;
 		for (s32 completed = 0; completed <= status.second; completed++)
 		{
-			sysutil_register_cb([statusCb, status, context, completed, arg, wkptr](ppu_thread& cb_ppu) -> s32
+			sysutil_register_cb([statusCb, status, context, completed, arg, queued](ppu_thread& cb_ppu) -> s32
 			{
 				// TODO: it is possible that we need to check the return value here as well.
 				statusCb(cb_ppu, context, status.first, completed, status.second, arg);
 
-				const auto queued = wkptr.lock();
 				if (queued && (*queued)-- == 1)
 				{
 					queued->notify_one();

@@ -24,9 +24,15 @@ class spu_thread;
 template <typename T>
 class named_thread;
 
+namespace cfg
+{
+	class _base;
+}
+
 enum class system_state : u32
 {
 	stopped,
+	loading,
 	stopping,
 	running,
 	paused,
@@ -52,6 +58,7 @@ enum class game_boot_result : u32
 	savestate_version_unsupported,
 	still_running,
 	already_added,
+	currently_restricted,
 };
 
 constexpr bool is_error(game_boot_result res)
@@ -67,7 +74,7 @@ struct EmuCallbacks
 	std::function<void()> on_resume;
 	std::function<void()> on_stop;
 	std::function<void()> on_ready;
-	std::function<bool()> on_missing_fw;
+	std::function<void()> on_missing_fw;
 	std::function<void(std::shared_ptr<atomic_t<bool>>, int)> on_emulation_stop_no_response;
 	std::function<void(std::shared_ptr<atomic_t<bool>>, stx::shared_ptr<utils::serial>, stx::atomic_ptr<std::string>*, std::shared_ptr<void>)> on_save_state_progress;
 	std::function<void(bool enabled)> enable_disc_eject;
@@ -93,6 +100,7 @@ struct EmuCallbacks
 	std::function<std::unique_ptr<class TrophyNotificationBase>()> get_trophy_notification_dialog;
 	std::function<std::string(localized_string_id, const char*)> get_localized_string;
 	std::function<std::u32string(localized_string_id, const char*)> get_localized_u32string;
+	std::function<std::string(const cfg::_base*, u32)> get_localized_setting;
 	std::function<void(const std::string&)> play_sound;
 	std::function<bool(const std::string&, std::string&, s32&, s32&, s32&)> get_image_info; // (filename, sub_type, width, height, CellSearchOrientation)
 	std::function<bool(const std::string&, s32, s32, s32&, s32&, u8*, bool)> get_scaled_image; // (filename, target_width, target_height, width, height, dst, force_fit)
@@ -117,6 +125,7 @@ class Emulator final
 	atomic_t<u64> m_pause_amend_time{0}; // increased when resumed
 	atomic_t<u64> m_stop_ctr{1}; // Increments when emulation is stopped
 	atomic_t<bool> m_emu_state_close_pending = false;
+	atomic_t<u64> m_restrict_emu_state_change{0};
 
 	games_config m_games_config;
 
@@ -177,7 +186,8 @@ public:
 	static constexpr std::string_view game_id_boot_prefix = "%RPCS3_GAMEID%:";
 	static constexpr std::string_view vfs_boot_prefix = "%RPCS3_VFS%:";
 
-	Emulator() = default;
+	Emulator() noexcept = default;
+	~Emulator() noexcept = default;
 
 	void SetCallbacks(EmuCallbacks&& cb)
 	{
@@ -199,8 +209,13 @@ public:
 	enum class stop_counter_t : u64{};
 
 	// Returns a different value each time we start a new emulation.
-	stop_counter_t GetEmulationIdentifier() const
+	stop_counter_t GetEmulationIdentifier(bool subtract_one = false) const
 	{
+		if (subtract_one)
+		{
+			return stop_counter_t{m_stop_ctr - 1};
+		}
+
 		return stop_counter_t{+m_stop_ctr};
 	}
 
@@ -331,6 +346,41 @@ public:
 		return m_config_mode == cfg_mode::continuous;
 	}
 
+	class emulation_state_guard_t
+	{
+		class Emulator* _this = nullptr;
+		bool active = true;
+
+	public:
+		explicit emulation_state_guard_t(Emulator* this0) noexcept
+			: _this(this0)
+		{
+			_this->m_restrict_emu_state_change++;
+		}
+
+		~emulation_state_guard_t() noexcept
+		{
+			if (active)
+			{
+				_this->m_restrict_emu_state_change--;
+			}
+		}
+
+		emulation_state_guard_t(emulation_state_guard_t&& rhs) noexcept
+		{
+			_this = rhs._this;
+			active = std::exchange(rhs.active, false);
+		}
+
+		emulation_state_guard_t& operator=(const emulation_state_guard_t&) = delete;
+		emulation_state_guard_t(const emulation_state_guard_t&) = delete;
+	};
+
+	emulation_state_guard_t MakeEmulationStateGuard()
+	{
+		return emulation_state_guard_t{this};
+	}
+
 	game_boot_result BootGame(const std::string& path, const std::string& title_id = "", bool direct = false, cfg_mode config_mode = cfg_mode::custom, const std::string& config_path = "");
 	bool BootRsxCapture(const std::string& path);
 
@@ -342,11 +392,16 @@ public:
 	void FixGuestTime();
 	void FinalizeRunRequest();
 
+	bool IsBootingRestricted() const
+	{
+		return m_restrict_emu_state_change != 0;
+	}
+
 private:
 	struct savestate_stage
 	{
 		bool prepared = false;
-		std::vector<std::pair<std::shared_ptr<named_thread<spu_thread>>, u32>> paused_spus;
+		std::vector<std::pair<shared_ptr<named_thread<spu_thread>>, u32>> paused_spus;
 	};
 public:
 
@@ -360,7 +415,7 @@ public:
 
 	bool IsRunning() const { return m_state == system_state::running; }
 	bool IsPaused()  const { return m_state >= system_state::paused; } // ready/starting are also considered paused by this function
-	bool IsStopped() const { return m_state <= system_state::stopping; }
+	bool IsStopped(bool test_fully = false) const { return test_fully ? m_state == system_state::stopped : m_state <= system_state::stopping; }
 	bool IsReady()   const { return m_state == system_state::ready; }
 	bool IsStarting() const { return m_state == system_state::starting; }
 	auto GetStatus(bool fixup = true) const { system_state state = m_state; return fixup && state == system_state::frozen ? system_state::paused : fixup && state == system_state::stopping ? system_state::stopped : state; }

@@ -94,7 +94,7 @@ void remove_item(QComboBox* box, int data_value, int def_value)
 
 extern const std::map<std::string_view, int> g_prx_list;
 
-settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, const int& tab_index, QWidget* parent, const GameInfo* game, bool create_cfg_from_global_cfg)
+settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, int tab_index, QWidget* parent, const GameInfo* game, bool create_cfg_from_global_cfg)
 	: QDialog(parent)
 	, m_tab_index(tab_index)
 	, ui(new Ui::settings_dialog)
@@ -448,9 +448,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	r_creator->update_names(
 	{
-		m_emu_settings->GetLocalizedSetting("Vulkan", emu_settings_type::Renderer, static_cast<int>(video_renderer::vulkan), true),
-		m_emu_settings->GetLocalizedSetting("OpenGl", emu_settings_type::Renderer, static_cast<int>(video_renderer::opengl), true),
-		m_emu_settings->GetLocalizedSetting("Null", emu_settings_type::Renderer, static_cast<int>(video_renderer::null), true)
+		m_emu_settings->GetLocalizedSetting(QString("Vulkan"), emu_settings_type::Renderer, static_cast<int>(video_renderer::vulkan), true),
+		m_emu_settings->GetLocalizedSetting(QString("OpenGl"), emu_settings_type::Renderer, static_cast<int>(video_renderer::opengl), true),
+		m_emu_settings->GetLocalizedSetting(QString("Null"), emu_settings_type::Renderer, static_cast<int>(video_renderer::null), true)
 	});
 
 	// Comboboxes
@@ -1098,7 +1098,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	};
 	for (const audio_format_flag& audio_fmt : audio_formats)
 	{
-		const QString audio_format_name = m_emu_settings->GetLocalizedSetting("", emu_settings_type::AudioFormats, static_cast<int>(audio_fmt), true);
+		const QString audio_format_name = m_emu_settings->GetLocalizedSetting(QString(), emu_settings_type::AudioFormats, static_cast<int>(audio_fmt), true);
 		QListWidgetItem* item = new QListWidgetItem(audio_format_name, ui->list_audio_formats);
 		item->setData(Qt::UserRole, static_cast<u32>(audio_fmt));
 		if (audio_fmt == audio_format_flag::lpcm_2_48khz)
@@ -1428,12 +1428,15 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->enableHostRoot, emu_settings_type::EnableHostRoot);
 	SubscribeTooltip(ui->enableHostRoot, tooltips.settings.enable_host_root);
 
+	m_emu_settings->EnhanceCheckBox(ui->emptyHdd0Tmp, emu_settings_type::EmptyHdd0Tmp);
+	SubscribeTooltip(ui->emptyHdd0Tmp, tooltips.settings.empty_hdd0_tmp);
+
 	m_emu_settings->EnhanceCheckBox(ui->enableCacheClearing, emu_settings_type::LimitCacheSize);
 	SubscribeTooltip(ui->gb_DiskCacheClearing, tooltips.settings.limit_cache_size);
 	if (game)
 		ui->gb_DiskCacheClearing->setDisabled(true);
 	else
-		connect(ui->enableCacheClearing, &QCheckBox::stateChanged, ui->maximumCacheSize, &QSlider::setEnabled);
+		connect(ui->enableCacheClearing, &QCheckBox::checkStateChanged, ui->maximumCacheSize, &QSlider::setEnabled);
 
 	// Date Time Edit Box
 	m_emu_settings->EnhanceDateTimeEdit(ui->console_time_edit, emu_settings_type::ConsoleTimeOffset, tr("dd MMM yyyy HH:mm"), true, true, 15000);
@@ -1580,7 +1583,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	ui->mfcDelayCommand->setChecked(m_emu_settings->GetSetting(emu_settings_type::MFCCommandsShuffling) == "1");
 	SubscribeTooltip(ui->mfcDelayCommand, tooltips.settings.mfc_delay_command);
-	connect(ui->mfcDelayCommand, &QCheckBox::stateChanged, [&](int val)
+	connect(ui->mfcDelayCommand, &QCheckBox::checkStateChanged, [&](Qt::CheckState val)
 	{
 		const std::string str = val != Qt::Unchecked ? "1" : "0";
 		m_emu_settings->SetSetting(emu_settings_type::MFCCommandsShuffling, str);
@@ -1592,6 +1595,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 #else
 	ui->disableMslFastMath->setVisible(false);
 #endif
+
+	m_emu_settings->EnhanceCheckBox(ui->disableAsyncHostMM, emu_settings_type::DisableAsyncHostMM);
+	SubscribeTooltip(ui->disableAsyncHostMM, tooltips.settings.disable_async_host_mm);
 
 	// Comboboxes
 
@@ -1849,6 +1855,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	m_emu_settings->EnhanceCheckBox(ui->showMouseAndKeyboardToggleHint, emu_settings_type::ShowMouseAndKeyboardToggleHint);
 	SubscribeTooltip(ui->showMouseAndKeyboardToggleHint, tooltips.settings.show_mouse_and_keyboard_toggle_hint);
+
+	m_emu_settings->EnhanceCheckBox(ui->showAutosaveAutoloadHint, emu_settings_type::ShowAutosaveAutoloadHint);
+	SubscribeTooltip(ui->showAutosaveAutoloadHint, tooltips.settings.show_autosave_autoload_hint);
 
 	m_emu_settings->EnhanceCheckBox(ui->pauseDuringHomeMenu, emu_settings_type::PauseDuringHomeMenu);
 	SubscribeTooltip(ui->pauseDuringHomeMenu, tooltips.settings.pause_during_home_menu);
@@ -2601,14 +2610,11 @@ void settings_dialog::ApplyStylesheet(bool reset)
 	}
 }
 
-int settings_dialog::exec()
+void settings_dialog::open()
 {
-	// singleShot Hack to fix following bug:
-	// If we use setCurrentIndex now we will miraculously see a resize of the dialog as soon as we
-	// switch to the cpu tab after conjuring the settings_dialog with another tab opened first.
-	// Weirdly enough this won't happen if we change the tab order so that anything else is at index 0.
-	ui->tab_widget_settings->setCurrentIndex(0);
-	QTimer::singleShot(0, [this]{ ui->tab_widget_settings->setCurrentIndex(m_tab_index); });
+	QDialog::open();
+
+	ui->tab_widget_settings->setCurrentIndex(m_tab_index);
 
 	// Open a dialog if your config file contained invalid entries
 	QTimer::singleShot(10, [this]
@@ -2634,14 +2640,12 @@ int settings_dialog::exec()
 			}
 		}
 	});
-
-	return QDialog::exec();
 }
 
 void settings_dialog::SubscribeDescription(QLabel* description)
 {
 	description->setFixedHeight(description->sizeHint().height());
-	m_description_labels.append(QPair<QLabel*, QString>(description, description->text()));
+	m_description_labels.push_back(std::pair<QLabel*, QString>(description, description->text()));
 }
 
 void settings_dialog::SubscribeTooltip(QObject* object, const QString& tooltip)
@@ -2674,11 +2678,9 @@ bool settings_dialog::eventFilter(QObject* object, QEvent* event)
 	{
 		const int i = ui->tab_widget_settings->currentIndex();
 
-		if (i < m_description_labels.size())
+		if (i >= 0 && static_cast<usz>(i) < m_description_labels.size())
 		{
-			QLabel* label = m_description_labels[i].first;
-
-			if (label)
+			if (QLabel* label = m_description_labels[i].first)
 			{
 				if (event->type() == QEvent::Enter)
 				{
@@ -2686,8 +2688,7 @@ bool settings_dialog::eventFilter(QObject* object, QEvent* event)
 				}
 				else if (event->type() == QEvent::Leave)
 				{
-					const QString description = m_description_labels[i].second;
-					label->setText(description);
+					label->setText(m_description_labels[i].second);
 				}
 			}
 		}

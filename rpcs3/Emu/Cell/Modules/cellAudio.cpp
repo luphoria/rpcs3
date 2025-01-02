@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"
+#include "Emu/Audio/audio_utils.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/Cell/lv2/sys_process.h"
 #include "Emu/Cell/lv2/sys_event.h"
@@ -556,7 +557,7 @@ void cell_audio_thread::advance(u64 timestamp)
 	m_dynamic_period = 0;
 
 	// send aftermix event (normal audio event)
-	std::array<std::shared_ptr<lv2_event_queue>, MAX_AUDIO_EVENT_QUEUES> queues;
+	std::array<shared_ptr<lv2_event_queue>, MAX_AUDIO_EVENT_QUEUES> queues;
 	u32 queue_count = 0;
 
 	event_period++;
@@ -1041,7 +1042,7 @@ void cell_audio_thread::mix(float* out_buffer, s32 offset)
 	constexpr u32 out_channels = static_cast<u32>(channels);
 	constexpr u32 out_buffer_sz = out_channels * AUDIO_BUFFER_SAMPLES;
 
-	const float master_volume = g_cfg.audio.volume / 100.0f;
+	const float master_volume = audio::get_volume();
 
 	// Reset out_buffer
 	std::memset(out_buffer, 0, out_buffer_sz * sizeof(float));

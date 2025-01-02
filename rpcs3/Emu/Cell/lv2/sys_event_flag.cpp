@@ -22,10 +22,9 @@ lv2_event_flag::lv2_event_flag(utils::serial& ar)
 	ar(pattern);
 }
 
-std::shared_ptr<void> lv2_event_flag::load(utils::serial& ar)
+std::function<void(void*)> lv2_event_flag::load(utils::serial& ar)
 {
-	auto eflag = std::make_shared<lv2_event_flag>(ar);
-	return lv2_obj::load(eflag->key, eflag);
+	return load_func(make_shared<lv2_event_flag>(ar));
 }
 
 void lv2_event_flag::save(utils::serial& ar)
@@ -66,7 +65,7 @@ error_code sys_event_flag_create(ppu_thread& ppu, vm::ptr<u32> id, vm::ptr<sys_e
 
 	if (const auto error = lv2_obj::create<lv2_event_flag>(_attr.pshared, ipc_key, _attr.flags, [&]
 	{
-		return std::make_shared<lv2_event_flag>(
+		return make_shared<lv2_event_flag>(
 			_attr.protocol,
 			ipc_key,
 			_attr.type,
@@ -330,7 +329,7 @@ error_code sys_event_flag_set(cpu_thread& cpu, u32 id, u64 bitptn)
 	// Warning: may be called from SPU thread.
 	sys_event_flag.trace("sys_event_flag_set(id=0x%x, bitptn=0x%llx)", id, bitptn);
 
-	const auto flag = idm::get<lv2_obj, lv2_event_flag>(id);
+	const auto flag = idm::get_unlocked<lv2_obj, lv2_event_flag>(id);
 
 	if (!flag)
 	{
@@ -357,16 +356,14 @@ error_code sys_event_flag_set(cpu_thread& cpu, u32 id, u64 bitptn)
 			}
 		}
 
-		// Process all waiters in single atomic op
-		const u32 count = flag->pattern.atomic_op([&](u64& value)
-		{
-			value |= bitptn;
-			u32 count = 0;
+		u32 count = 0;
 
-			if (!flag->sq)
-			{
-				return count;
-			}
+		// Process all waiters in single atomic op
+		for (u64 pattern = flag->pattern, to_write = pattern, dependant_mask = 0;; to_write = pattern, dependant_mask = 0)
+		{
+			count = 0;
+			to_write |= bitptn;
+			dependant_mask = 0;
 
 			for (auto ppu = +flag->sq; ppu; ppu = ppu->next_cpu)
 			{
@@ -405,10 +402,20 @@ error_code sys_event_flag_set(cpu_thread& cpu, u32 id, u64 bitptn)
 				const u64 pattern = ppu.gpr[4];
 				const u64 mode = ppu.gpr[5];
 
-				if (lv2_event_flag::check_pattern(value, pattern, mode, &ppu.gpr[6]))
+				// If it's OR mode, set bits must have waken up the thread therefore no
+				// dependency on old value
+				const u64 dependant_mask_or = ((mode & 0xf) == SYS_EVENT_FLAG_WAIT_OR || (bitptn & pattern & to_write) == pattern ? 0 : pattern);
+
+				if (lv2_event_flag::check_pattern(to_write, pattern, mode, &ppu.gpr[6]))
 				{
+					dependant_mask |= dependant_mask_or;
 					ppu.gpr[3] = CELL_OK;
 					count++;
+
+					if (!to_write)
+					{
+						break;
+					}
 				}
 				else
 				{
@@ -416,8 +423,29 @@ error_code sys_event_flag_set(cpu_thread& cpu, u32 id, u64 bitptn)
 				}
 			}
 
-			return count;
-		});
+			dependant_mask &= ~bitptn;
+
+			auto [new_val, ok] = flag->pattern.fetch_op([&](u64& x)
+			{
+				if ((x ^ pattern) & dependant_mask)
+				{
+					return false;
+				}
+
+				x |= bitptn;
+
+				// Clear the bit-wise difference
+				x &= ~((pattern | bitptn) & ~to_write);
+				return true;
+			});
+
+			if (ok)
+			{
+				break;
+			}
+
+			pattern = new_val;
+		}
 
 		if (!count)
 		{
@@ -473,7 +501,7 @@ error_code sys_event_flag_cancel(ppu_thread& ppu, u32 id, vm::ptr<u32> num)
 
 	if (num) *num = 0;
 
-	const auto flag = idm::get<lv2_obj, lv2_event_flag>(id);
+	const auto flag = idm::get_unlocked<lv2_obj, lv2_event_flag>(id);
 
 	if (!flag)
 	{

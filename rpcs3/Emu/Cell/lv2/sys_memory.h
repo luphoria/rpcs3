@@ -74,7 +74,7 @@ struct lv2_memory_container
 
 	lv2_memory_container(u32 size, bool from_idm = false) noexcept;
 	lv2_memory_container(utils::serial& ar, bool from_idm = false) noexcept;
-	static std::shared_ptr<void> load(utils::serial& ar);
+	static std::function<void(void*)> load(utils::serial& ar);
 	void save(utils::serial& ar);
 	static lv2_memory_container* search(u32 id);
 
@@ -128,13 +128,13 @@ struct sys_memory_user_memory_stat_t
 };
 
 // SysCalls
-error_code sys_memory_allocate(cpu_thread& cpu, u32 size, u64 flags, vm::ptr<u32> alloc_addr);
-error_code sys_memory_allocate_from_container(cpu_thread& cpu, u32 size, u32 cid, u64 flags, vm::ptr<u32> alloc_addr);
+error_code sys_memory_allocate(cpu_thread& cpu, u64 size, u64 flags, vm::ptr<u32> alloc_addr);
+error_code sys_memory_allocate_from_container(cpu_thread& cpu, u64 size, u32 cid, u64 flags, vm::ptr<u32> alloc_addr);
 error_code sys_memory_free(cpu_thread& cpu, u32 start_addr);
 error_code sys_memory_get_page_attribute(cpu_thread& cpu, u32 addr, vm::ptr<sys_page_attr_t> attr);
 error_code sys_memory_get_user_memory_size(cpu_thread& cpu, vm::ptr<sys_memory_info_t> mem_info);
 error_code sys_memory_get_user_memory_stat(cpu_thread& cpu, vm::ptr<sys_memory_user_memory_stat_t> mem_stat);
-error_code sys_memory_container_create(cpu_thread& cpu, vm::ptr<u32> cid, u32 size);
+error_code sys_memory_container_create(cpu_thread& cpu, vm::ptr<u32> cid, u64 size);
 error_code sys_memory_container_destroy(cpu_thread& cpu, u32 cid);
 error_code sys_memory_container_get_size(cpu_thread& cpu, vm::ptr<sys_memory_info_t> mem_info, u32 cid);
 error_code sys_memory_container_destroy_parent_with_childs(cpu_thread& cpu, u32 cid, u32 must_0, vm::ptr<u32> mc_child);

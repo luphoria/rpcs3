@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QMap>
+#include <map>
 #include <vector>
 
 // Node location
@@ -103,6 +103,7 @@ enum class emu_settings_type
 	DisableMSLFastMath,
 	OutputScalingMode,
 	ForceHwMSAAResolve,
+	DisableAsyncHostMM,
 
 	// Performance Overlay
 	PerfOverlayEnabled,
@@ -111,6 +112,8 @@ enum class emu_settings_type
 	PerfOverlayFramerateDatapoints,
 	PerfOverlayFrametimeDatapoints,
 	PerfOverlayDetailLevel,
+	PerfOverlayFramerateDetailLevel,
+	PerfOverlayFrametimeDetailLevel,
 	PerfOverlayPosition,
 	PerfOverlayUpdateInterval,
 	PerfOverlayFontSize,
@@ -178,6 +181,7 @@ enum class emu_settings_type
 	ShowPressureIntensityToggleHint,
 	ShowAnalogLimiterToggleHint,
 	ShowMouseAndKeyboardToggleHint,
+	ShowAutosaveAutoloadHint,
 	WindowTitleFormat,
 	PauseDuringHomeMenu,
 
@@ -196,13 +200,14 @@ enum class emu_settings_type
 	KeyboardType,
 	EnterButtonAssignment,
 	EnableHostRoot,
+	EmptyHdd0Tmp,
 	LimitCacheSize,
 	MaximumCacheSize,
 	ConsoleTimeOffset,
 };
 
 /** A helper map that keeps track of where a given setting type is located*/
-inline static const QMap<emu_settings_type, cfg_location> settings_location =
+inline static const std::map<emu_settings_type, cfg_location> settings_location =
 {
 	// Core Tab
 	{ emu_settings_type::PPUDecoder,               { "Core", "PPU Decoder"}},
@@ -291,6 +296,7 @@ inline static const QMap<emu_settings_type, cfg_location> settings_location =
 	{ emu_settings_type::DisableMSLFastMath,         { "Video", "Disable MSL Fast Math"}},
 	{ emu_settings_type::OutputScalingMode,          { "Video", "Output Scaling Mode"}},
 	{ emu_settings_type::ForceHwMSAAResolve,         { "Video", "Force Hardware MSAA Resolve"}},
+	{ emu_settings_type::DisableAsyncHostMM,         { "Video", "Disable Asynchronous Memory Manager"}},
 
 	// Vulkan
 	{ emu_settings_type::VulkanAsyncTextureUploads,           { "Video", "Vulkan", "Asynchronous Texture Streaming 2"}},
@@ -305,6 +311,8 @@ inline static const QMap<emu_settings_type, cfg_location> settings_location =
 	{ emu_settings_type::PerfOverlayFramerateDatapoints,   { "Video", "Performance Overlay", "Framerate datapoints" } },
 	{ emu_settings_type::PerfOverlayFrametimeDatapoints,   { "Video", "Performance Overlay", "Frametime datapoints" } },
 	{ emu_settings_type::PerfOverlayDetailLevel,           { "Video", "Performance Overlay", "Detail level" } },
+	{ emu_settings_type::PerfOverlayFramerateDetailLevel,  { "Video", "Performance Overlay", "Framerate graph detail level" } },
+	{ emu_settings_type::PerfOverlayFrametimeDetailLevel,  { "Video", "Performance Overlay", "Frametime graph detail level" } },
 	{ emu_settings_type::PerfOverlayPosition,              { "Video", "Performance Overlay", "Position" } },
 	{ emu_settings_type::PerfOverlayUpdateInterval,        { "Video", "Performance Overlay", "Metrics update interval (ms)" } },
 	{ emu_settings_type::PerfOverlayFontSize,              { "Video", "Performance Overlay", "Font size (px)" } },
@@ -375,6 +383,7 @@ inline static const QMap<emu_settings_type, cfg_location> settings_location =
 	{ emu_settings_type::SilenceAllLogs,                  { "Miscellaneous", "Silence All Logs" }},
 	{ emu_settings_type::WindowTitleFormat,               { "Miscellaneous", "Window Title Format" }},
 	{ emu_settings_type::PauseDuringHomeMenu,             { "Miscellaneous", "Pause Emulation During Home Menu" }},
+	{ emu_settings_type::ShowAutosaveAutoloadHint,        { "Miscellaneous", "Show autosave/autoload hint" }},
 
 	// Networking
 	{ emu_settings_type::InternetStatus, { "Net", "Internet enabled"}},
@@ -391,6 +400,7 @@ inline static const QMap<emu_settings_type, cfg_location> settings_location =
 	{ emu_settings_type::KeyboardType,          { "System", "Keyboard Type"} },
 	{ emu_settings_type::EnterButtonAssignment, { "System", "Enter button assignment"}},
 	{ emu_settings_type::EnableHostRoot,        { "VFS", "Enable /host_root/"}},
+	{ emu_settings_type::EmptyHdd0Tmp,          { "VFS", "Empty /dev_hdd0/tmp/"}},
 	{ emu_settings_type::LimitCacheSize,        { "VFS", "Limit disk cache size"}},
 	{ emu_settings_type::MaximumCacheSize,      { "VFS", "Disk cache maximum size (MB)"}},
 	{ emu_settings_type::ConsoleTimeOffset,     { "System", "Console time offset (s)"}},

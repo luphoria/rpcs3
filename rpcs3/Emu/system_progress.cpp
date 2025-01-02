@@ -13,7 +13,8 @@
 LOG_CHANNEL(sys_log, "SYS");
 
 // Progress display server synchronization variables
-atomic_t<progress_dialog_string_t> g_progr{};
+lf_array<atomic_ptr<std::string>> g_progr_text_queue;
+progress_dialog_string_t g_progr_text{};
 atomic_t<u32> g_progr_ftotal{0};
 atomic_t<u32> g_progr_fdone{0};
 atomic_t<u64> g_progr_ftotal_bits{0};
@@ -43,11 +44,11 @@ void progress_dialog_server::operator()()
 
 	const auto get_state = []()
 	{
-		auto whole_state = std::make_tuple(+g_progr.load(), +g_progr_ftotal, +g_progr_fdone, +g_progr_ftotal_bits, +g_progr_fknown_bits, +g_progr_ptotal, +g_progr_pdone);
+		auto whole_state = std::make_tuple(g_progr_text.operator std::string(), +g_progr_ftotal, +g_progr_fdone, +g_progr_ftotal_bits, +g_progr_fknown_bits, +g_progr_ptotal, +g_progr_pdone);
 
 		while (true)
 		{
-			auto new_state = std::make_tuple(+g_progr.load(), +g_progr_ftotal, +g_progr_fdone, +g_progr_ftotal_bits, +g_progr_fknown_bits, +g_progr_ptotal, +g_progr_pdone);
+			auto new_state = std::make_tuple(g_progr_text.operator std::string(), +g_progr_ftotal, +g_progr_fdone, +g_progr_ftotal_bits, +g_progr_fknown_bits, +g_progr_ptotal, +g_progr_pdone);
 
 			if (new_state == whole_state)
 			{
@@ -64,9 +65,9 @@ void progress_dialog_server::operator()()
 	while (!g_system_progress_stopping && thread_ctrl::state() != thread_state::aborting)
 	{
 		// Wait for the start condition
-		const char* text0 = g_progr.load();
+		std::string text0 = g_progr_text;
 
-		while (!text0)
+		while (text0.empty())
 		{
 			if (g_system_progress_stopping || thread_ctrl::state() == thread_state::aborting)
 			{
@@ -75,9 +76,9 @@ void progress_dialog_server::operator()()
 
 			if (g_progr_ftotal || g_progr_fdone || g_progr_ptotal || g_progr_pdone)
 			{
-				const auto& [text_new, ftotal, fdone, ftotal_bits, fknown_bits, ptotal, pdone] = get_state();
+				const auto [text_new, ftotal, fdone, ftotal_bits, fknown_bits, ptotal, pdone] = get_state();
 
-				if (text_new)
+				if (!text_new.empty())
 				{
 					text0 = text_new;
 					break;
@@ -97,7 +98,7 @@ void progress_dialog_server::operator()()
 			}
 
 			thread_ctrl::wait_for(5000);
-			text0 = g_progr.load();
+			text0 = g_progr_text;
 		}
 
 		if (g_system_progress_stopping || thread_ctrl::state() == thread_state::aborting)
@@ -131,7 +132,7 @@ void progress_dialog_server::operator()()
 
 				native_dlg = manager->create<rsx::overlays::progress_dialog>(true);
 				native_dlg->show(false, text0, type, msg_dialog_source::sys_progress, nullptr);
-				native_dlg->progress_bar_set_message(0, "Please wait");
+				native_dlg->progress_bar_set_message(0, get_localized_string(localized_string_id::PROGRESS_DIALOG_PLEASE_WAIT));
 			}
 		}
 
@@ -164,7 +165,7 @@ void progress_dialog_server::operator()()
 		u64 ftotal_bits = 0;
 		u32 ptotal = 0;
 		u32 pdone = 0;
-		const char* text1 = nullptr;
+		std::string text1;
 
 		const u64 start_time = get_system_time();
 		u64 wait_no_update_count = 0;
@@ -179,7 +180,7 @@ void progress_dialog_server::operator()()
 			!g_system_progress_stopping && thread_ctrl::state() != thread_state::aborting;
 			thread_ctrl::wait_until(&sleep_until, std::exchange(sleep_for, 500)))
 		{
-			const auto& [text_new, ftotal_new, fdone_new, ftotal_bits_new, fknown_bits_new, ptotal_new, pdone_new] = get_state();
+			const auto [text_new, ftotal_new, fdone_new, ftotal_bits_new, fknown_bits_new, ptotal_new, pdone_new] = get_state();
 
 			// Force-update every 20 seconds to update remaining time
 			if (wait_no_update_count == 100u * 20 || ftotal != ftotal_new || fdone != fdone_new || fknown_bits != fknown_bits_new
@@ -193,14 +194,14 @@ void progress_dialog_server::operator()()
 				ptotal = ptotal_new;
 				pdone  = pdone_new;
 
-				const bool text_changed = text_new && text_new != text1;
+				const bool text_changed = !text_new.empty() && text_new != text1;
 
-				if (text_new)
+				if (!text_new.empty())
 				{
 					text1 = text_new;
 				}
 
-				if (!text1)
+				if (text1.empty())
 				{
 					// Cannot do anything
 					continue;
@@ -250,14 +251,16 @@ void progress_dialog_server::operator()()
 				const u64 done  = pdone;
 				const u32 value = static_cast<u32>(done >= total ? 100 : done * 100 / total);
 
-				std::string progr = "Progress:";
+				std::string progr;
 
 				if (ftotal || ptotal)
 				{
+					progr = get_localized_string(localized_string_id::PROGRESS_DIALOG_PROGRESS);
+
 					if (ftotal)
-						fmt::append(progr, " file %u of %u%s", fdone, ftotal, ptotal ? "," : "");
+						fmt::append(progr, " %s %u %s %u%s", get_localized_string(localized_string_id::PROGRESS_DIALOG_FILE), fdone, get_localized_string(localized_string_id::PROGRESS_DIALOG_OF), ftotal, ptotal ? "," : "");
 					if (ptotal)
-						fmt::append(progr, " module %u of %u", pdone, ptotal);
+						fmt::append(progr, " %s %u %s %u", get_localized_string(localized_string_id::PROGRESS_DIALOG_MODULE), pdone, get_localized_string(localized_string_id::PROGRESS_DIALOG_OF), ptotal);
 
 					const u32 of_1000 = static_cast<u32>(done >= total ? 1000 : done * 1000 / total);
 
@@ -303,29 +306,29 @@ void progress_dialog_server::operator()()
 						}
 						else if (done >= total)
 						{
-							fmt::append(progr, " (done)", minutes, seconds);
+							fmt::append(progr, " (%s)", get_localized_string(localized_string_id::PROGRESS_DIALOG_DONE));
 						}
 						else if (hours)
 						{
-							fmt::append(progr, " (%uh %2um remaining)", hours, minutes);
+							fmt::append(progr, " (%uh %2um %s)", hours, minutes, get_localized_string(localized_string_id::PROGRESS_DIALOG_REMAINING));
 						}
 						else if (minutes >= 2)
 						{
-							fmt::append(progr, " (%um remaining)", minutes);
+							fmt::append(progr, " (%um %s)", minutes, get_localized_string(localized_string_id::PROGRESS_DIALOG_REMAINING));
 						}
 						else if (minutes == 0)
 						{
-							fmt::append(progr, " (%us remaining)", std::max<u64>(seconds, 1));
+							fmt::append(progr, " (%us %s)", std::max<u64>(seconds, 1), get_localized_string(localized_string_id::PROGRESS_DIALOG_REMAINING));
 						}
 						else
 						{
-							fmt::append(progr, " (%um %2us remaining)", minutes, seconds);
+							fmt::append(progr, " (%um %2us %s)", minutes, seconds, get_localized_string(localized_string_id::PROGRESS_DIALOG_REMAINING));
 						}
 					}
 				}
 				else
 				{
-					fmt::append(progr, " analyzing...");
+					progr = get_localized_string(localized_string_id::PROGRESS_DIALOG_PROGRESS_ANALYZING);
 				}
 
 				// Changes detected, send update
@@ -361,7 +364,7 @@ void progress_dialog_server::operator()()
 			}
 
 			// Leave only if total count is equal to done count
-			if (ftotal == fdone && ptotal == pdone && !text_new)
+			if (ftotal == fdone && ptotal == pdone && text_new.empty())
 			{
 				// Complete state, empty message: close dialog
 				break;
@@ -409,7 +412,7 @@ void progress_dialog_server::operator()()
 
 	if (native_dlg && g_system_progress_stopping)
 	{
-		native_dlg->set_text("Stopping. Please wait...");
+		native_dlg->set_text(get_localized_string(localized_string_id::PROGRESS_DIALOG_STOPPING_PLEASE_WAIT));
 		native_dlg->refresh();
 	}
 
@@ -427,5 +430,5 @@ progress_dialog_server::~progress_dialog_server()
 	g_progr_fknown_bits.release(0);
 	g_progr_ptotal.release(0);
 	g_progr_pdone.release(0);
-	g_progr.release(progress_dialog_string_t{});
+	g_progr_text.data.release(std::common_type_t<progress_dialog_string_t::data_t>{});
 }

@@ -13,6 +13,8 @@
 
 LOG_CHANNEL(cfg_log, "CFG");
 
+extern void qt_events_aware_op(int repeat_duration_ms, std::function<bool()> wrapped_op);
+
 namespace gui
 {
 	QString stylesheet;
@@ -108,7 +110,7 @@ namespace gui
 
 gui_settings::gui_settings(QObject* parent) : settings(parent)
 {
-	m_settings.reset(new QSettings(ComputeSettingsDir() + gui::Settings + ".ini", QSettings::Format::IniFormat, parent));
+	m_settings = std::make_unique<QSettings>(ComputeSettingsDir() + gui::Settings + ".ini", QSettings::Format::IniFormat, parent);
 }
 
 QStringList gui_settings::GetGameListCategoryFilters(bool is_list_mode) const
@@ -123,6 +125,7 @@ QStringList gui_settings::GetGameListCategoryFilters(bool is_list_mode) const
 	if (GetCategoryVisibility(Category::Home, is_list_mode)) filterList.append(cat::cat_home);
 	if (GetCategoryVisibility(Category::Media, is_list_mode)) filterList.append(cat::media);
 	if (GetCategoryVisibility(Category::Data, is_list_mode)) filterList.append(cat::data);
+	if (GetCategoryVisibility(Category::OS, is_list_mode)) filterList.append(cat::os);
 	if (GetCategoryVisibility(Category::Unknown_Cat, is_list_mode)) filterList.append(cat::cat_unknown);
 	if (GetCategoryVisibility(Category::Others, is_list_mode)) filterList.append(cat::others);
 
@@ -193,11 +196,22 @@ void gui_settings::ShowInfoBox(const QString& title, const QString& text, const 
 
 bool gui_settings::GetBootConfirmation(QWidget* parent, const gui_save& gui_save_entry)
 {
-	while (Emu.GetStatus(false) == system_state::stopping)
+	// Ensure no game has booted inbetween
+	const auto guard = Emu.MakeEmulationStateGuard();
+
+	const auto info = Emu.GetEmulationIdentifier();
+	const auto old_status = Emu.GetStatus(false);
+
+	qt_events_aware_op(16, [&]()
 	{
-		QCoreApplication::processEvents();
-		std::this_thread::sleep_for(16ms);
-	}
+		if (Emu.GetStatus(false) != system_state::stopping)
+		{
+			ensure(info == Emu.GetEmulationIdentifier(old_status == system_state::stopping));
+			return true;
+		}
+
+		return false;
+	});
 
 	if (!Emu.IsStopped())
 	{
@@ -331,6 +345,7 @@ gui_save gui_settings::GetGuiSaveForCategory(int cat, bool is_list_mode)
 	case Category::PSP_Game: return is_list_mode ? gui::cat_psp_game : gui::grid_cat_psp_game;
 	case Category::Media: return is_list_mode ? gui::cat_audio_video : gui::grid_cat_audio_video;
 	case Category::Data: return is_list_mode ? gui::cat_game_data : gui::grid_cat_game_data;
+	case Category::OS: return is_list_mode ? gui::cat_os : gui::grid_cat_os;
 	case Category::Unknown_Cat: return is_list_mode ? gui::cat_unknown : gui::grid_cat_unknown;
 	case Category::Others: return is_list_mode ? gui::cat_other : gui::grid_cat_other;
 	default:

@@ -28,10 +28,13 @@ lv2_memory_container::lv2_memory_container(utils::serial& ar, bool from_idm) noe
 {
 }
 
-std::shared_ptr<void> lv2_memory_container::load(utils::serial& ar)
+std::function<void(void*)> lv2_memory_container::load(utils::serial& ar)
 {
 	// Use idm::last_id() only for the instances at IDM
-	return std::make_shared<lv2_memory_container>(stx::exact_t<utils::serial&>(ar), true);
+	return [ptr = make_shared<lv2_memory_container>(stx::exact_t<utils::serial&>(ar), true)](void* storage)
+	{
+		*static_cast<shared_ptr<lv2_memory_container>*>(storage) = ptr;
+	};
 }
 
 void lv2_memory_container::save(utils::serial& ar)
@@ -43,7 +46,7 @@ lv2_memory_container* lv2_memory_container::search(u32 id)
 {
 	if (id != SYS_MEMORY_CONTAINER_ID_INVALID)
 	{
-		return idm::check<lv2_memory_container>(id);
+		return idm::check_unlocked<lv2_memory_container>(id);
 	}
 
 	return &g_fxo->get<lv2_memory_container>();
@@ -93,7 +96,7 @@ std::shared_ptr<vm::block_t> reserve_map(u32 alloc_size, u32 align)
 
 // Todo: fix order of error checks
 
-error_code sys_memory_allocate(cpu_thread& cpu, u32 size, u64 flags, vm::ptr<u32> alloc_addr)
+error_code sys_memory_allocate(cpu_thread& cpu, u64 size, u64 flags, vm::ptr<u32> alloc_addr)
 {
 	cpu.state += cpu_flag::wait;
 
@@ -129,9 +132,9 @@ error_code sys_memory_allocate(cpu_thread& cpu, u32 size, u64 flags, vm::ptr<u32
 		return {CELL_ENOMEM, dct.size - dct.used};
 	}
 
-	if (const auto area = reserve_map(size, align))
+	if (const auto area = reserve_map(static_cast<u32>(size), align))
 	{
-		if (const u32 addr = area->alloc(size, nullptr, align))
+		if (const u32 addr = area->alloc(static_cast<u32>(size), nullptr, align))
 		{
 			ensure(!g_fxo->get<sys_memory_address_table>().addrs[addr >> 16].exchange(&dct));
 
@@ -139,7 +142,7 @@ error_code sys_memory_allocate(cpu_thread& cpu, u32 size, u64 flags, vm::ptr<u32
 			{
 				sys_memory.notice("sys_memory_allocate(): Allocated 0x%x address (size=0x%x)", addr, size);
 
-				vm::lock_sudo(addr, size);
+				vm::lock_sudo(addr, static_cast<u32>(size));
 				cpu.check_state();
 				*alloc_addr = addr;
 				return CELL_OK;
@@ -155,7 +158,7 @@ error_code sys_memory_allocate(cpu_thread& cpu, u32 size, u64 flags, vm::ptr<u32
 	return CELL_ENOMEM;
 }
 
-error_code sys_memory_allocate_from_container(cpu_thread& cpu, u32 size, u32 cid, u64 flags, vm::ptr<u32> alloc_addr)
+error_code sys_memory_allocate_from_container(cpu_thread& cpu, u64 size, u32 cid, u64 flags, vm::ptr<u32> alloc_addr)
 {
 	cpu.state += cpu_flag::wait;
 
@@ -203,15 +206,15 @@ error_code sys_memory_allocate_from_container(cpu_thread& cpu, u32 size, u32 cid
 		return {ct.ret, ct->size - ct->used};
 	}
 
-	if (const auto area = reserve_map(size, align))
+	if (const auto area = reserve_map(static_cast<u32>(size), align))
 	{
-		if (const u32 addr = area->alloc(size))
+		if (const u32 addr = area->alloc(static_cast<u32>(size)))
 		{
 			ensure(!g_fxo->get<sys_memory_address_table>().addrs[addr >> 16].exchange(ct.ptr.get()));
 
 			if (alloc_addr)
 			{
-				vm::lock_sudo(addr, size);
+				vm::lock_sudo(addr, static_cast<u32>(size));
 				cpu.check_state();
 				*alloc_addr = addr;
 				return CELL_OK;
@@ -320,7 +323,7 @@ error_code sys_memory_get_user_memory_stat(cpu_thread& cpu, vm::ptr<sys_memory_u
 	return CELL_OK;
 }
 
-error_code sys_memory_container_create(cpu_thread& cpu, vm::ptr<u32> cid, u32 size)
+error_code sys_memory_container_create(cpu_thread& cpu, vm::ptr<u32> cid, u64 size)
 {
 	cpu.state += cpu_flag::wait;
 
@@ -345,7 +348,7 @@ error_code sys_memory_container_create(cpu_thread& cpu, vm::ptr<u32> cid, u32 si
 	}
 
 	// Create the memory container
-	if (const u32 id = idm::make<lv2_memory_container>(size, true))
+	if (const u32 id = idm::make<lv2_memory_container>(static_cast<u32>(size), true))
 	{
 		cpu.check_state();
 		*cid = id;
@@ -397,7 +400,7 @@ error_code sys_memory_container_get_size(cpu_thread& cpu, vm::ptr<sys_memory_inf
 
 	sys_memory.warning("sys_memory_container_get_size(mem_info=*0x%x, cid=0x%x)", mem_info, cid);
 
-	const auto ct = idm::get<lv2_memory_container>(cid);
+	const auto ct = idm::get_unlocked<lv2_memory_container>(cid);
 
 	if (!ct)
 	{

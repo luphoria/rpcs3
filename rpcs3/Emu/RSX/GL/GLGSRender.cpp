@@ -3,9 +3,12 @@
 #include "../Overlays/Shaders/shader_loading_dialog_native.h"
 #include "GLGSRender.h"
 #include "GLCompute.h"
+#include "GLDMA.h"
 
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/RSX/rsx_methods.h"
+#include "Emu/RSX/Host/MM.h"
+#include "Emu/RSX/Host/RSXDMAWriter.h"
 #include "Emu/RSX/NV47/HW/context_accessors.define.h"
 
 [[noreturn]] extern void report_fatal_error(std::string_view _text, bool is_html = false, bool include_help_text = true);
@@ -178,6 +181,20 @@ void GLGSRender::on_init_thread()
 	{
 		// NVIDIA's attribute interpolation requires some workarounds
 		backend_config.supports_normalized_barycentrics = false;
+	}
+
+	if (gl_caps.AMD_pinned_memory && g_cfg.video.host_label_synchronization)
+	{
+		backend_config.supports_host_gpu_labels = true;
+
+		m_host_gpu_context_data = std::make_unique<gl::buffer>();
+		m_host_gpu_context_data->create(gl::buffer::target::array, 4096, nullptr, gl::buffer::memory_type::host_visible,
+			gl::buffer::usage::host_read | gl::buffer::usage::host_write | gl::buffer::usage::persistent_map);
+
+		auto host_context_ptr = reinterpret_cast<rsx::host_gpu_context_t*>(m_host_gpu_context_data->map(0, 4096, gl::buffer::access::persistent_rw));
+		m_host_dma_ctrl = std::make_unique<rsx::RSXDMAWriter>(host_context_ptr);
+		m_enqueued_host_write_buffer = std::make_unique<gl::scratch_ring_buffer>();
+		m_enqueued_host_write_buffer->create(gl::buffer::target::array, 64 * 0x100000, gl::buffer::usage::dynamic_update);
 	}
 
 	// Use industry standard resource alignment values as defaults
@@ -397,6 +414,7 @@ void GLGSRender::on_exit()
 	// TODO: Move these
 	gl::destroy_compute_tasks();
 	gl::destroy_overlay_passes();
+	gl::clear_dma_resources();
 
 	gl::destroy_global_texture_resources();
 
@@ -406,6 +424,10 @@ void GLGSRender::on_exit()
 
 	m_prog_buffer.clear();
 	m_rtts.destroy();
+
+	m_host_dma_ctrl.reset();
+	m_host_gpu_context_data.reset();
+	m_enqueued_host_write_buffer.reset();
 
 	for (auto &fbo : m_framebuffer_cache)
 	{
@@ -818,8 +840,8 @@ void GLGSRender::load_program_env()
 		// Vertex state
 		auto mapping = m_vertex_env_buffer->alloc_from_heap(144, m_uniform_buffer_offset_align);
 		auto buf = static_cast<u8*>(mapping.first);
-		fill_scale_offset_data(buf, false);
-		fill_user_clip_data(buf + 64);
+		m_draw_processor.fill_scale_offset_data(buf, false);
+		m_draw_processor.fill_user_clip_data(buf + 64);
 		*(reinterpret_cast<u32*>(buf + 128)) = rsx::method_registers.transform_branch_bits();
 		*(reinterpret_cast<f32*>(buf + 132)) = rsx::method_registers.point_size() * rsx::get_resolution_scale();
 		*(reinterpret_cast<f32*>(buf + 136)) = rsx::method_registers.clip_min();
@@ -865,7 +887,7 @@ void GLGSRender::load_program_env()
 		// Fragment state
 		auto mapping = m_fragment_env_buffer->alloc_from_heap(32, m_uniform_buffer_offset_align);
 		auto buf = static_cast<u8*>(mapping.first);
-		fill_fragment_state_buffer(buf, current_fragment_program);
+		m_draw_processor.fill_fragment_state_buffer(buf, current_fragment_program);
 
 		m_fragment_env_buffer->bind_range(GL_FRAGMENT_STATE_BIND_SLOT, mapping.second, 32);
 	}
@@ -966,7 +988,7 @@ void GLGSRender::upload_transform_constants(const rsx::io_buffer& buffer)
 			: std::span<const u16>(m_vertex_prog->constant_ids);
 
 		buffer.reserve(transform_constants_size);
-		fill_vertex_program_constants_data(buffer.data(), constant_ids);
+		m_draw_processor.fill_vertex_program_constants_data(buffer.data(), constant_ids);
 	}
 }
 
@@ -985,7 +1007,14 @@ void GLGSRender::update_vertex_env(const gl::vertex_upload_info& upload_info)
 	buf[1] = upload_info.vertex_index_offset;
 	buf += 4;
 
-	fill_vertex_layout_state(m_vertex_layout, upload_info.first_vertex, upload_info.allocated_vertex_count, reinterpret_cast<s32*>(buf), upload_info.persistent_mapping_offset, upload_info.volatile_mapping_offset);
+	m_draw_processor.fill_vertex_layout_state(
+		m_vertex_layout,
+		current_vp_metadata,
+		upload_info.first_vertex,
+		upload_info.allocated_vertex_count,
+		reinterpret_cast<s32*>(buf),
+		upload_info.persistent_mapping_offset,
+		upload_info.volatile_mapping_offset);
 
 	m_vertex_layout_buffer->bind_range(GL_VERTEX_LAYOUT_BIND_SLOT, mapping.second, 128 + 16);
 
@@ -1061,6 +1090,8 @@ void GLGSRender::patch_transform_constants(rsx::context* ctx, u32 index, u32 cou
 
 bool GLGSRender::on_access_violation(u32 address, bool is_writing)
 {
+	rsx::mm_flush(address);
+
 	const bool can_flush = is_current_thread();
 	const rsx::invalidation_cause cause = is_writing
 		? (can_flush ? rsx::invalidation_cause::write : rsx::invalidation_cause::deferred_write)
@@ -1193,7 +1224,7 @@ void GLGSRender::notify_tile_unbound(u32 tile)
 	if (false)
 	{
 		u32 addr = rsx::get_address(tiles[tile].offset, tiles[tile].location);
-		on_notify_memory_unmapped(addr, tiles[tile].size);
+		on_notify_pre_memory_unmapped(addr, tiles[tile].size, *std::make_unique<std::vector<std::pair<u64, u64>>>());
 		m_rtts.invalidate_surface_address(addr, false);
 	}
 
@@ -1201,6 +1232,66 @@ void GLGSRender::notify_tile_unbound(u32 tile)
 		std::lock_guard lock(m_sampler_mutex);
 		m_samplers_dirty.store(true);
 	}
+}
+
+bool GLGSRender::release_GCM_label(u32 address, u32 args)
+{
+	if (!backend_config.supports_host_gpu_labels)
+	{
+		return false;
+	}
+
+	auto host_ctx = ensure(m_host_dma_ctrl->host_ctx());
+
+	if (host_ctx->texture_loads_completed())
+	{
+		// We're about to poll waiting for GPU state, ensure the context is still valid.
+		gl::check_state();
+
+		// All texture loads already seen by the host GPU
+		// Wait for all previously submitted labels to be flushed
+		m_host_dma_ctrl->drain_label_queue();
+		return false;
+	}
+
+	const auto mapping = gl::map_dma(address, 4);
+	const auto write_data = std::bit_cast<u32, be_t<u32>>(args);
+	const auto release_event_id = host_ctx->on_label_acquire();
+
+	// We don't have async texture loads yet, so just release both the label and the commands complete
+	u64 write_buf[2] = { write_data, release_event_id };
+	const auto host_read_offset = m_enqueued_host_write_buffer->alloc(16, 16);
+	m_enqueued_host_write_buffer->get().sub_data(host_read_offset, 16, write_buf);
+
+	// Now write to DMA and then to host context
+	m_enqueued_host_write_buffer->get().copy_to(mapping.second, host_read_offset, mapping.first, 4);
+	m_enqueued_host_write_buffer->get().copy_to(m_host_gpu_context_data.get(), host_read_offset + 8, ::offset32(&rsx::host_gpu_context_t::commands_complete_event), 8);
+	m_enqueued_host_write_buffer->push_barrier(host_read_offset, 16);
+
+	host_ctx->on_label_release();
+	return true;
+}
+
+void GLGSRender::enqueue_host_context_write(u32 offset, u32 size, const void* data)
+{
+	ensure(size <= 8);
+	const u32 host_read_offset = m_enqueued_host_write_buffer->alloc(8, 16);
+	m_enqueued_host_write_buffer->get().sub_data(host_read_offset, size, data);
+	m_enqueued_host_write_buffer->get().copy_to(m_host_gpu_context_data.get(), host_read_offset, offset, size);
+	m_enqueued_host_write_buffer->push_barrier(host_read_offset, 16);
+}
+
+void GLGSRender::on_guest_texture_read()
+{
+	if (!backend_config.supports_host_gpu_labels)
+	{
+		return;
+	}
+
+	// Tag the read as being in progress
+	u64 event_id = m_host_dma_ctrl->host_ctx()->inc_counter();
+	m_host_dma_ctrl->host_ctx()->texture_load_request_event = event_id;
+	enqueue_host_context_write(::offset32(&rsx::host_gpu_context_t::texture_load_complete_event), 8, &event_id);
 }
 
 void GLGSRender::begin_occlusion_query(rsx::reports::occlusion_query_info* query)
