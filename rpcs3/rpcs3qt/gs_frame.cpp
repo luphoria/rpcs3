@@ -12,7 +12,6 @@
 #include "Emu/IdManager.h"
 #include "Emu/Audio/audio_utils.h"
 #include "Emu/Cell/Modules/cellScreenshot.h"
-#include "Emu/Cell/Modules/cellVideoOut.h"
 #include "Emu/Cell/Modules/cellAudio.h"
 #include "Emu/Cell/lv2/sys_rsxaudio.h"
 #include "Emu/RSX/rsx_utils.h"
@@ -54,18 +53,12 @@ extern atomic_t<bool> g_user_asked_for_recording;
 extern atomic_t<bool> g_user_asked_for_screenshot;
 extern atomic_t<bool> g_user_asked_for_frame_capture;
 extern atomic_t<bool> g_disable_frame_limit;
+extern atomic_t<bool> g_game_window_focused;
 extern atomic_t<recording_mode> g_recording_mode;
-
-atomic_t<bool> g_game_window_focused = false;
 
 namespace pad
 {
 	extern atomic_t<bool> g_home_menu_requested;
-}
-
-bool is_input_allowed()
-{
-	return g_game_window_focused || g_cfg.io.background_input_enabled;
 }
 
 gs_frame::gs_frame(QScreen* screen, const QRect& geometry, const QIcon& appIcon, std::shared_ptr<gui_settings> gui_settings, bool force_fullscreen)
@@ -73,9 +66,8 @@ gs_frame::gs_frame(QScreen* screen, const QRect& geometry, const QIcon& appIcon,
 	, m_initial_geometry(geometry)
 	, m_gui_settings(std::move(gui_settings))
 	, m_start_games_fullscreen(force_fullscreen)
+	, m_renderer(g_cfg.video.renderer)
 {
-	load_gui_settings();
-
 	m_window_title = Emu.GetFormattedTitle(0);
 
 	if (!g_cfg_recording.load())
@@ -127,8 +119,7 @@ gs_frame::gs_frame(QScreen* screen, const QRect& geometry, const QIcon& appIcon,
 		create();
 	}
 
-	m_shortcut_handler = new shortcut_handler(gui::shortcuts::shortcut_handler_id::game_window, this, m_gui_settings);
-	connect(m_shortcut_handler, &shortcut_handler::shortcut_activated, this, &gs_frame::handle_shortcut);
+	load_gui_settings();
 
 	// Change cursor when in fullscreen.
 	connect(this, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility)
@@ -180,6 +171,20 @@ void gs_frame::load_gui_settings()
 	m_lock_mouse_in_fullscreen  = m_gui_settings->GetValue(gui::gs_lockMouseFs).toBool();
 	m_hide_mouse_after_idletime = m_gui_settings->GetValue(gui::gs_hideMouseIdle).toBool();
 	m_hide_mouse_idletime = m_gui_settings->GetValue(gui::gs_hideMouseIdleTime).toUInt();
+
+	if (m_disable_kb_hotkeys)
+	{
+		if (m_shortcut_handler)
+		{
+			m_shortcut_handler->deleteLater();
+			m_shortcut_handler = nullptr;
+		}
+	}
+	else if (!m_shortcut_handler)
+	{
+		m_shortcut_handler = new shortcut_handler(gui::shortcuts::shortcut_handler_id::game_window, this, m_gui_settings);
+		connect(m_shortcut_handler, &shortcut_handler::shortcut_activated, this, &gs_frame::handle_shortcut);
+	}
 }
 
 void gs_frame::update_shortcuts()
@@ -242,6 +247,11 @@ void gs_frame::handle_shortcut(gui::shortcuts::shortcut shortcut_key, const QKey
 {
 	gui_log.notice("Game window registered shortcut: %s (%s)", shortcut_key, key_sequence.toString());
 
+	if (m_disable_kb_hotkeys)
+	{
+		return;
+	}
+
 	switch (shortcut_key)
 	{
 	case gui::shortcuts::shortcut::gw_toggle_fullscreen:
@@ -251,7 +261,7 @@ void gs_frame::handle_shortcut(gui::shortcuts::shortcut shortcut_key, const QKey
 	}
 	case gui::shortcuts::shortcut::gw_exit_fullscreen:
 	{
-		if (visibility() == FullScreen && !m_disable_kb_hotkeys)
+		if (visibility() == FullScreen)
 		{
 			toggle_fullscreen();
 		}
@@ -280,67 +290,57 @@ void gs_frame::handle_shortcut(gui::shortcuts::shortcut shortcut_key, const QKey
 	}
 	case gui::shortcuts::shortcut::gw_pause_play:
 	{
-		if (!m_disable_kb_hotkeys)
+		switch (Emu.GetStatus())
 		{
-			switch (Emu.GetStatus())
-			{
-			case system_state::ready:
-			{
-				Emu.Run(true);
-				return;
-			}
-			case system_state::paused:
-			{
-				Emu.Resume();
-				return;
-			}
-			default:
-			{
-				Emu.Pause();
-				return;
-			}
-			}
+		case system_state::ready:
+		{
+			Emu.Run(true);
+			return;
+		}
+		case system_state::paused:
+		{
+			Emu.Resume();
+			return;
+		}
+		default:
+		{
+			Emu.Pause();
+			return;
+		}
 		}
 		break;
 	}
 	case gui::shortcuts::shortcut::gw_restart:
 	{
-		if (!m_disable_kb_hotkeys)
+		if (Emu.IsStopped())
 		{
-			if (Emu.IsStopped())
-			{
-				Emu.Restart();
-				return;
-			}
-
-			extern bool boot_last_savestate(bool testing);
-			boot_last_savestate(false);
+			Emu.Restart();
+			return;
 		}
+
+		extern bool boot_last_savestate(bool testing);
+		boot_last_savestate(false);
 		break;
 	}
 	case gui::shortcuts::shortcut::gw_savestate:
 	{
-		if (!m_disable_kb_hotkeys)
+		if (!g_cfg.savestate.suspend_emu)
 		{
-			if (!g_cfg.savestate.suspend_emu)
+			Emu.after_kill_callback = []()
 			{
-				Emu.after_kill_callback = []()
-				{
-					Emu.Restart();
-				};
-			}
+				Emu.Restart();
+			};
 
-			Emu.Kill(false, true);
-			return;
+			// Make sure we keep the game window opened
+			Emu.SetContinuousMode(true);
 		}
-		break;
+
+		Emu.Kill(false, true);
+		return;
 	}
 	case gui::shortcuts::shortcut::gw_rsx_capture:
 	{
-		if (!m_disable_kb_hotkeys)
-		{
-			g_user_asked_for_frame_capture = true;
-		}
+		g_user_asked_for_frame_capture = true;
 		break;
 	}
 	case gui::shortcuts::shortcut::gw_frame_limit:
@@ -602,6 +602,11 @@ void gs_frame::close()
 
 	gui_log.notice("Closing game window");
 
+	if (m_ignore_stop_events)
+	{
+		return;
+	}
+
 	Emu.CallFromMainThread([this]()
 	{
 		// Hide window if necessary
@@ -621,6 +626,10 @@ void gs_frame::close()
 			deleteLater();
 		}
 	});
+}
+
+void gs_frame::reset()
+{
 }
 
 bool gs_frame::shown()
@@ -652,9 +661,6 @@ void gs_frame::show()
 			}
 		}
 	});
-
-	// if we do this before show, the QWinTaskbarProgress won't show
-	m_progress_indicator->show(this);
 }
 
 display_handle_t gs_frame::handle() const
@@ -795,7 +801,7 @@ void gs_frame::present_frame(std::vector<u8>& data, u32 pitch, u32 width, u32 he
 	video_provider.present_frame(data, pitch, width, height, is_bgra);
 }
 
-void gs_frame::take_screenshot(std::vector<u8> data, u32 sshot_width, u32 sshot_height, bool is_bgra)
+void gs_frame::take_screenshot(std::vector<u8>&& data, u32 sshot_width, u32 sshot_height, bool is_bgra)
 {
 	std::thread(
 		[sshot_width, sshot_height, is_bgra](std::vector<u8> sshot_data)
@@ -1103,7 +1109,7 @@ void gs_frame::handle_cursor(QWindow::Visibility visibility, bool visibility_cha
 
 void gs_frame::mouse_hide_timeout()
 {
-	// Our idle timeout occured, so we update the cursor
+	// Our idle timeout occurred, so we update the cursor
 	if (m_hide_mouse_after_idletime && m_show_mouse)
 	{
 		handle_cursor(visibility(), false, false, false);
@@ -1133,6 +1139,11 @@ bool gs_frame::event(QEvent* ev)
 		}
 
 		gui_log.notice("Game window close event issued");
+
+		if (m_ignore_stop_events)
+		{
+			return QWindow::event(ev);
+		}
 
 		if (Emu.IsStopped())
 		{

@@ -3,6 +3,8 @@
 #include "../rsx_methods.h"
 #include "../Common/BufferUtils.h"
 
+#include "Emu/RSX/NV47/HW/context_accessors.define.h"
+
 namespace gl
 {
 	GLenum comparison_op(rsx::comparison_function op)
@@ -153,7 +155,7 @@ void GLGSRender::update_draw_state()
 			gl_state.depth_func(gl::comparison_op(rsx::method_registers.depth_func()));
 		}
 
-		if (gl::get_driver_caps().EXT_depth_bounds_test && (gl_state.enable(rsx::method_registers.depth_bounds_test_enabled(), GL_DEPTH_BOUNDS_TEST_EXT)))
+		if (gl::get_driver_caps().EXT_depth_bounds_test_supported && (gl_state.enable(rsx::method_registers.depth_bounds_test_enabled(), GL_DEPTH_BOUNDS_TEST_EXT)))
 		{
 			gl_state.depth_bounds(rsx::method_registers.depth_bounds_min(), rsx::method_registers.depth_bounds_max());
 		}
@@ -256,6 +258,32 @@ void GLGSRender::update_draw_state()
 			gl_state.enablei(mrt_blend_enabled[2], GL_BLEND, 2);
 			gl_state.enablei(mrt_blend_enabled[3], GL_BLEND, 3);
 		}
+
+		// Antialias control
+		if (backend_config.supports_hw_msaa)
+		{
+			gl_state.enable(/*REGS(m_ctx)->msaa_enabled()*/GL_MULTISAMPLE);
+
+			gl_state.enable(GL_SAMPLE_MASK);
+			gl_state.sample_mask(REGS(m_ctx)->msaa_sample_mask());
+
+			gl_state.enable(GL_SAMPLE_SHADING);
+			gl_state.min_sample_shading_rate(1.f);
+
+			gl_state.enable(GL_SAMPLE_COVERAGE);
+			gl_state.sample_coverage(1.f);
+		}
+
+		if (backend_config.supports_hw_a2c)
+		{
+			const bool hw_enable = backend_config.supports_hw_a2c_1spp || REGS(m_ctx)->surface_antialias() != rsx::surface_antialiasing::center_1_sample;
+			gl_state.enable(hw_enable && REGS(m_ctx)->msaa_alpha_to_coverage_enabled(), GL_SAMPLE_ALPHA_TO_COVERAGE);
+		}
+
+		if (backend_config.supports_hw_a2one)
+		{
+			gl_state.enable(REGS(m_ctx)->msaa_alpha_to_one_enabled(), GL_SAMPLE_ALPHA_TO_ONE);
+		}
 	}
 
 	switch (rsx::method_registers.current_draw_clause.primitive)
@@ -306,12 +334,6 @@ void GLGSRender::update_draw_state()
 
 	// Clip planes
 	gl_state.clip_planes((current_vertex_program.output_mask >> CELL_GCM_ATTRIB_OUTPUT_UC0) & 0x3F);
-
-	// Sample control
-	// TODO: MinSampleShading
-	//gl_state.enable(rsx::method_registers.msaa_enabled(), GL_MULTISAMPLE);
-	//gl_state.enable(rsx::method_registers.msaa_alpha_to_coverage_enabled(), GL_SAMPLE_ALPHA_TO_COVERAGE);
-	//gl_state.enable(rsx::method_registers.msaa_alpha_to_one_enabled(), GL_SAMPLE_ALPHA_TO_ONE);
 
 	//TODO
 	//NV4097_SET_ANISO_SPREAD
@@ -364,6 +386,16 @@ void GLGSRender::load_texture_env()
 					else if (sampler_state->format_class != previous_format_class)
 					{
 						m_graphics_state |= rsx::fragment_program_state_dirty;
+					}
+
+					if (const auto texture_format = tex.format() & ~(CELL_GCM_TEXTURE_UN | CELL_GCM_TEXTURE_LN);
+						sampler_state->format_class != rsx::classify_format(texture_format) &&
+						(texture_format == CELL_GCM_TEXTURE_A8R8G8B8 || texture_format == CELL_GCM_TEXTURE_D8R8G8B8))
+					{
+						// Depth format redirected to BGRA8 resample stage. Do not filter to avoid bits leaking.
+						// If accurate graphics are desired, force a bitcast to COLOR as a workaround.
+						m_fs_sampler_states[i].set_parameteri(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+						m_fs_sampler_states[i].set_parameteri(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 					}
 				}
 			}
@@ -577,7 +609,11 @@ void GLGSRender::emit_geometry(u32 sub_index)
 
 	if (!upload_info.index_info)
 	{
-		if (draw_call.is_single_draw())
+		if (draw_call.is_trivial_instanced_draw)
+		{
+			glDrawArraysInstanced(draw_mode, 0, upload_info.vertex_draw_count, draw_call.pass_count());
+		}
+		else if (draw_call.is_single_draw())
 		{
 			glDrawArrays(draw_mode, 0, upload_info.vertex_draw_count);
 		}
@@ -603,7 +639,7 @@ void GLGSRender::emit_geometry(u32 sub_index)
 
 				if (driver_caps.vendor_AMD && (first + range.count) > (0x100000 >> 2))
 				{
-					//Unlikely, but added here in case the identity buffer is not large enough somehow
+					// Unlikely, but added here in case the identity buffer is not large enough somehow
 					use_draw_arrays_fallback = true;
 					break;
 				}
@@ -613,7 +649,7 @@ void GLGSRender::emit_geometry(u32 sub_index)
 
 			if (use_draw_arrays_fallback)
 			{
-				//MultiDrawArrays is broken on some primitive types using AMD. One known type is GL_TRIANGLE_STRIP but there could be more
+				// MultiDrawArrays is broken on some primitive types using AMD. One known type is GL_TRIANGLE_STRIP but there could be more
 				for (u32 n = 0; n < draw_count; ++n)
 				{
 					glDrawArrays(draw_mode, firsts[n], counts[n]);
@@ -621,13 +657,13 @@ void GLGSRender::emit_geometry(u32 sub_index)
 			}
 			else if (driver_caps.vendor_AMD)
 			{
-				//Use identity index buffer to fix broken vertexID on AMD
+				// Use identity index buffer to fix broken vertexID on AMD
 				m_identity_index_buffer->bind();
 				glMultiDrawElements(draw_mode, counts, GL_UNSIGNED_INT, offsets, static_cast<GLsizei>(draw_count));
 			}
 			else
 			{
-				//Normal render
+				// Normal render
 				glMultiDrawArrays(draw_mode, firsts, counts, static_cast<GLsizei>(draw_count));
 			}
 		}
@@ -645,7 +681,11 @@ void GLGSRender::emit_geometry(u32 sub_index)
 
 		m_index_ring_buffer->bind();
 
-		if (draw_call.is_single_draw())
+		if (draw_call.is_trivial_instanced_draw)
+		{
+			glDrawElementsInstanced(draw_mode, upload_info.vertex_draw_count, index_type, reinterpret_cast<GLvoid*>(u64{ index_offset }), draw_call.pass_count());
+		}
+		else if (draw_call.is_single_draw())
 		{
 			glDrawElements(draw_mode, upload_info.vertex_draw_count, index_type, reinterpret_cast<GLvoid*>(u64{index_offset}));
 		}
@@ -694,6 +734,7 @@ void GLGSRender::begin()
 	if (m_graphics_state & rsx::pipeline_state::invalidate_pipeline_bits)
 	{
 		// Shaders need to be reloaded.
+		m_prev_program = m_program;
 		m_program = nullptr;
 	}
 }
@@ -709,10 +750,7 @@ void GLGSRender::end()
 		return;
 	}
 
-	if (m_graphics_state & (rsx::pipeline_state::fragment_program_ucode_dirty | rsx::pipeline_state::vertex_program_ucode_dirty))
-	{
-		analyse_current_rsx_pipeline();
-	}
+	analyse_current_rsx_pipeline();
 
 	m_frame_stats.setup_time += m_profiler.duration();
 
@@ -758,13 +796,20 @@ void GLGSRender::end()
 		m_program->validate();
 	}
 
-	rsx::method_registers.current_draw_clause.begin();
+	auto& draw_call = REGS(m_ctx)->current_draw_clause;
+	draw_call.begin();
 	u32 subdraw = 0u;
 	do
 	{
 		emit_geometry(subdraw++);
+
+		if (draw_call.is_trivial_instanced_draw)
+		{
+			// We already completed. End the draw.
+			draw_call.end();
+		}
 	}
-	while (rsx::method_registers.current_draw_clause.next());
+	while (draw_call.next());
 
 	m_rtts.on_write(m_framebuffer_layout.color_write_enabled, m_framebuffer_layout.zeta_write_enabled);
 
@@ -776,6 +821,7 @@ void GLGSRender::end()
 	m_vertex_layout_buffer->notify();
 	m_fragment_constants_buffer->notify();
 	m_transform_constants_buffer->notify();
+	m_instancing_ring_buffer->notify();
 
 	m_frame_stats.setup_time += m_profiler.duration();
 

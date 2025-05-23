@@ -19,6 +19,10 @@
 #include <functional>
 #include <deque>
 
+#ifdef _WIN32
+#include "Windows.h"
+#endif
+
 class gs_frame;
 class main_window;
 class gui_settings;
@@ -65,6 +69,8 @@ public:
 	/** Call this method before calling app.exec */
 	bool Init() override;
 
+	static s32 get_language_id();
+
 	std::unique_ptr<gs_frame> get_gs_frame();
 
 	main_window* m_main_window = nullptr;
@@ -86,6 +92,8 @@ private:
 	void UpdatePlaytime();
 	void StopPlaytime();
 
+	void set_language_code(QString language_code);
+
 	class native_event_filter : public QAbstractNativeEventFilter
 	{
 	public:
@@ -95,6 +103,7 @@ private:
 
 	QTranslator m_translator;
 	QString m_language_code;
+	static s32 m_language_id;
 
 	QTimer m_timer;
 	QElapsedTimer m_timer_playtime;
@@ -117,6 +126,12 @@ private:
 	u64 m_pause_delayed_tag = 0;
 	typename Emulator::stop_counter_t m_emu_focus_out_emulation_id{};
 	bool m_is_pause_on_focus_loss_active = false;
+
+#ifdef _WIN32
+	void register_device_notification(WId window_id);
+	void unregister_device_notification();
+	HDEVNOTIFY m_device_notification_handle {};
+#endif
 
 private Q_SLOTS:
 	void OnChangeStyleSheetRequest();

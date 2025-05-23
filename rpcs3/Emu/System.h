@@ -12,8 +12,6 @@
 #include <vector>
 #include <set>
 
-#include "Emu/Cell/timers.hpp"
-
 void init_fxo_for_exec(utils::serial*, bool);
 
 enum class localized_string_id;
@@ -53,6 +51,7 @@ enum class game_boot_result : u32
 	decryption_error,
 	file_creation_error,
 	firmware_missing,
+	firmware_version,
 	unsupported_disc_type,
 	savestate_corrupted,
 	savestate_version_unsupported,
@@ -86,6 +85,7 @@ struct EmuCallbacks
 	std::function<void(std::string_view title_id)> init_pad_handler;
 	std::function<void()> update_emu_settings;
 	std::function<void()> save_emu_settings;
+	std::function<void()> close_gs_frame;
 	std::function<std::unique_ptr<class GSFrameBase>()> get_gs_frame;
 	std::function<std::shared_ptr<class camera_handler_base>()> get_camera_handler;
 	std::function<std::shared_ptr<class music_handler_base>()> get_music_handler;
@@ -108,6 +108,10 @@ struct EmuCallbacks
 	std::function<std::vector<std::string>()> get_font_dirs;
 	std::function<bool(const std::vector<std::string>&)> on_install_pkgs;
 	std::function<void(u32)> add_breakpoint;
+	std::function<bool()> display_sleep_control_supported;
+	std::function<void(bool)> enable_display_sleep;
+	std::function<void()> check_microphone_permissions;
+	std::function<std::unique_ptr<class video_source>()> make_video_source;
 };
 
 namespace utils
@@ -139,6 +143,7 @@ class Emulator final
 	std::string m_path_original;
 	std::string m_title_id;
 	std::string m_title;
+	std::string m_localized_title;
 	std::string m_app_version;
 	std::string m_hash;
 	std::string m_cat;
@@ -154,6 +159,7 @@ class Emulator final
 	// 2. It signifies that we don't want to exit on Kill(), for example if we want to transition to another application.
 	bool m_force_boot = false;
 
+	bool m_continuous_mode = false;
 	bool m_has_gui = true;
 
 	bool m_state_inspection_savestate = false;
@@ -204,7 +210,7 @@ public:
 		std::source_location src_loc = std::source_location::current()) const;
 
 	// Blocking call from the GUI thread
-	void BlockingCallFromMainThread(std::function<void()>&& func, std::source_location src_loc = std::source_location::current()) const;
+	void BlockingCallFromMainThread(std::function<void()>&& func, bool track_emu_state = true, std::source_location src_loc = std::source_location::current()) const;
 
 	enum class stop_counter_t : u64{};
 
@@ -276,6 +282,11 @@ public:
 		return m_title;
 	}
 
+	const std::string& GetLocalizedTitle() const
+	{
+		return m_localized_title;
+	}
+
 	const std::string GetTitleAndTitleID() const
 	{
 		return m_title + (m_title_id.empty() ? "" : " [" + m_title_id + "]");
@@ -329,8 +340,6 @@ public:
 
 	void SetUsr(const std::string& user);
 
-	std::string GetBackgroundPicturePath() const;
-
 	u64 GetPauseTime() const
 	{
 		return m_pause_amend_time;
@@ -344,6 +353,15 @@ public:
 	bool IsChildProcess() const
 	{
 		return m_config_mode == cfg_mode::continuous;
+	}
+
+	bool ContinuousModeEnabled(bool reset)
+	{
+		if (reset)
+		{
+			return std::exchange(m_continuous_mode, false);
+		}
+		return m_continuous_mode;
 	}
 
 	class emulation_state_guard_t
@@ -385,6 +403,7 @@ public:
 	bool BootRsxCapture(const std::string& path);
 
 	void SetForceBoot(bool force_boot);
+	void SetContinuousMode(bool continuous_mode);
 
 	game_boot_result Load(const std::string& title_id = "", bool is_disc_patch = false, usz recursion_count = 0);
 	void Run(bool start_playtime);
@@ -407,14 +426,15 @@ public:
 
 	bool Pause(bool freeze_emulation = false, bool show_resume_message = true);
 	void Resume();
-	void GracefulShutdown(bool allow_autoexit = true, bool async_op = false, bool savestate = false);
+	void GracefulShutdown(bool allow_autoexit = true, bool async_op = false, bool savestate = false, bool continuous_mode = false);
 	void Kill(bool allow_autoexit = true, bool savestate = false, savestate_stage* stage = nullptr);
 	game_boot_result Restart(bool graceful = true);
 	bool Quit(bool force_quit);
 	static void CleanUp();
 
 	bool IsRunning() const { return m_state == system_state::running; }
-	bool IsPaused()  const { return m_state >= system_state::paused; } // ready/starting are also considered paused by this function
+	bool IsPaused() const { system_state state = m_state; return state >= system_state::paused && state <= system_state::frozen; }
+	bool IsPausedOrReady() const { return m_state >= system_state::paused; }
 	bool IsStopped(bool test_fully = false) const { return test_fully ? m_state == system_state::stopped : m_state <= system_state::stopping; }
 	bool IsReady()   const { return m_state == system_state::ready; }
 	bool IsStarting() const { return m_state == system_state::starting; }
@@ -434,6 +454,7 @@ public:
 	u32 AddGamesFromDir(const std::string& path);
 	game_boot_result AddGame(const std::string& path);
 	game_boot_result AddGameToYml(const std::string& path);
+	u32 RemoveGamesFromDir(const std::string& games_dir, const std::vector<std::string>& serials_to_remove_from_yml = {}, bool save_on_disk = true);
 	u32 RemoveGames(const std::vector<std::string>& title_id_list, bool save_on_disk = true);
 	game_boot_result RemoveGameFromYml(const std::string& title_id);
 
@@ -455,8 +476,6 @@ public:
 };
 
 extern Emulator Emu;
-
-extern bool g_log_all_errors;
 
 extern bool g_use_rtm;
 extern u64 g_rtm_tx_limit1;

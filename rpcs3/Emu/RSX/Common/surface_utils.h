@@ -2,7 +2,6 @@
 
 #include "util/types.hpp"
 #include "Utilities/geometry.h"
-#include "Utilities/address_range.h"
 #include "TextureUtils.h"
 #include "../rsx_utils.h"
 #include "Emu/Memory/vm.h"
@@ -436,9 +435,9 @@ namespace rsx
 			memory_tag_samples[0].second = ~memory_tag_samples[0].second;
 		}
 
-		bool test()
+		bool test() const
 		{
-			for (auto &e : memory_tag_samples)
+			for (const auto& e : memory_tag_samples)
 			{
 				if (e.second != *reinterpret_cast<nse_t<u64, 1>*>(vm::g_sudo_addr + e.first))
 					return false;
@@ -472,10 +471,10 @@ namespace rsx
 				return 0;
 
 			// Sort here before doing transfers since surfaces may have been updated in the meantime
-			std::sort(old_contents.begin(), old_contents.end(), [](auto& a, auto &b)
+			std::sort(old_contents.begin(), old_contents.end(), [](const auto& a, const auto &b)
 			{
-				auto _a = static_cast<T*>(a.source);
-				auto _b = static_cast<T*>(b.source);
+				const auto _a = static_cast<const T*>(a.source);
+				const auto _b = static_cast<const T*>(b.source);
 				return (_a->last_use_tag < _b->last_use_tag);
 			});
 

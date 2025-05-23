@@ -84,6 +84,7 @@ skateboard_pad_handler::skateboard_pad_handler()
 	b_has_battery = false;
 	b_has_battery_led = false;
 	b_has_pressure_intensity_button = false;
+	b_has_orientation = true;
 
 	m_name_string = "Skateboard #";
 	m_max_devices = CELL_PAD_MAX_PORT_NUM;
@@ -134,6 +135,8 @@ void skateboard_pad_handler::init_config(cfg_pad* cfg)
 	cfg->tilt_left.def  = ::at32(button_list, skateboard_key_codes::tilt_left);
 	cfg->tilt_right.def = ::at32(button_list, skateboard_key_codes::tilt_right);
 
+	cfg->orientation_reset_button.def = ::at32(button_list, skateboard_key_codes::none);
+
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = 0;
 	cfg->rstick_anti_deadzone.def = 0;
@@ -146,7 +149,7 @@ void skateboard_pad_handler::init_config(cfg_pad* cfg)
 	cfg->from_default();
 }
 
-void skateboard_pad_handler::check_add_device(hid_device* hidDevice, std::string_view path, std::wstring_view wide_serial)
+void skateboard_pad_handler::check_add_device(hid_device* hidDevice, hid_enumerated_device_view path, std::wstring_view wide_serial)
 {
 	if (!hidDevice)
 	{
@@ -230,13 +233,17 @@ skateboard_pad_handler::DataStatus skateboard_pad_handler::get_data(skateboard_d
 PadHandlerBase::connection skateboard_pad_handler::update_connection(const std::shared_ptr<PadDevice>& device)
 {
 	skateboard_device* dev = static_cast<skateboard_device*>(device.get());
-	if (!dev || dev->path.empty())
+	if (!dev || dev->path == hid_enumerated_device_default)
 		return connection::disconnected;
 
 	if (dev->hidDevice == nullptr)
 	{
 		// try to reconnect
+#ifdef ANDROID
+		if (hid_device* hid_dev = hid_libusb_wrap_sys_device(dev->path, -1))
+#else
 		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
+#endif
 		{
 			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
@@ -323,6 +330,8 @@ void skateboard_pad_handler::get_extended_info(const pad_ensemble& binding)
 	pad->m_sensors[1].m_value = Clamp0To1023(input.large_axes[1]);
 	pad->m_sensors[2].m_value = Clamp0To1023(input.large_axes[2]);
 	pad->m_sensors[3].m_value = Clamp0To1023(input.large_axes[3]);
+
+	set_raw_orientation(*pad);
 }
 
 pad_preview_values skateboard_pad_handler::get_preview_values(const std::unordered_map<u64, u16>& /*data*/)

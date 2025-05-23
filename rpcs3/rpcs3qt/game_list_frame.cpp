@@ -2,28 +2,24 @@
 #include "qt_utils.h"
 #include "settings_dialog.h"
 #include "pad_settings_dialog.h"
-#include "custom_table_widget_item.h"
 #include "input_dialog.h"
 #include "localized.h"
 #include "progress_dialog.h"
 #include "persistent_settings.h"
 #include "emu_settings.h"
 #include "gui_settings.h"
-#include "game_list_delegate.h"
+#include "gui_application.h"
 #include "game_list_table.h"
 #include "game_list_grid.h"
 #include "game_list_grid_item.h"
 #include "patch_manager_dialog.h"
 
-#include "Emu/Memory/vm.h"
 #include "Emu/System.h"
 #include "Emu/vfs_config.h"
 #include "Emu/system_utils.hpp"
 #include "Loader/PSF.h"
 #include "util/types.hpp"
 #include "Utilities/File.h"
-#include "Utilities/mutex.h"
-#include "util/yaml.hpp"
 #include "util/sysinfo.hpp"
 #include "Input/pad_thread.h"
 
@@ -227,6 +223,7 @@ void game_list_frame::LoadSettings()
 	m_category_filters = m_gui_settings->GetGameListCategoryFilters(true);
 	m_grid_category_filters = m_gui_settings->GetGameListCategoryFilters(false);
 	m_draw_compat_status_to_grid = m_gui_settings->GetValue(gui::gl_draw_compat).toBool();
+	m_prefer_game_data_icons = m_gui_settings->GetValue(gui::gl_pref_gd_icon).toBool();
 	m_show_custom_icons = m_gui_settings->GetValue(gui::gl_custom_icon).toBool();
 	m_play_hover_movies = m_gui_settings->GetValue(gui::gl_hover_gifs).toBool();
 
@@ -422,22 +419,9 @@ void game_list_frame::Refresh(const bool from_drive, const std::vector<std::stri
 
 		const std::string games_dir = rpcs3::utils::get_games_dir();
 
-		// List of serials (title id) to remove in "games.yml" file (if any)
-		std::vector<std::string> serials_to_remove = serials_to_remove_from_yml; // Initialize the list with the specified serials (if any)
-
-		// Scan game list to detect the titles belonging to auto-detection "games" folder
-		for (const auto& [serial, path] : Emu.GetGamesConfig().get_games()) // Loop on game list file
-		{
-			// NOTE: Used starts_with(games_dir) instead of Emu.IsPathInsideDir(path, games_dir) due the latter would check also the existence of the paths
-			//
-			if (path.starts_with(games_dir)) // If game path belongs to auto-detection "games" folder, add the serial to the removal list
-			{
-				serials_to_remove.push_back(serial);
-			}
-		}
-
-		// Remove the specified and detected serials (title id) only from the game list in memory (not yet in "games.yml" file)
-		Emu.RemoveGames(serials_to_remove, false);
+		// Remove the specified and detected serials (title id) belonging to "games_dir" folder only from the game list in memory
+		// (not yet in "games.yml" file)
+		Emu.RemoveGamesFromDir(games_dir, serials_to_remove_from_yml, false);
 
 		// Scan auto-detection "games" folder adding the detected titles to the game list plus flushing also all the other changes in "games.yml" file
 		if (const u32 games_added = Emu.AddGamesFromDir(games_dir); games_added != 0)
@@ -578,12 +562,16 @@ void game_list_frame::OnParsingFinished()
 	sort(m_path_entries.begin(), m_path_entries.end(), [](const path_entry& l, const path_entry& r){return l.path < r.path;});
 	m_path_entries.erase(unique(m_path_entries.begin(), m_path_entries.end(), [](const path_entry& l, const path_entry& r){return l.path == r.path;}), m_path_entries.end());
 
+	const s32 language_index = gui_application::get_language_id();
 	const std::string game_icon_path = fs::get_config_dir() + "/Icons/game_icons/";
+	const std::string localized_title = fmt::format("TITLE_%02d", language_index);
+	const std::string localized_icon = fmt::format("ICON0_%02d.PNG", language_index);
+	const std::string localized_movie = fmt::format("ICON1_%02d.PAM", language_index);
 
-	const auto add_game = [this, dev_flash, cat_unknown_localized = localized.category.unknown.toStdString(), cat_unknown = cat::cat_unknown.toStdString(), game_icon_path, _hdd, play_hover_movies = m_play_hover_movies, show_custom_icons = m_show_custom_icons](const std::string& dir_or_elf)
+	const auto add_game = [this, localized_title, localized_icon, localized_movie, dev_flash, cat_unknown_localized = localized.category.unknown.toStdString(), cat_unknown = cat::cat_unknown.toStdString(), game_icon_path, _hdd, play_hover_movies = m_play_hover_movies, show_custom_icons = m_show_custom_icons](const std::string& dir_or_elf)
 	{
-		GameInfo game{};
-		game.path = dir_or_elf;
+		gui_game_info game{};
+		game.info.path = dir_or_elf;
 
 		const Localized thread_localized;
 
@@ -599,13 +587,13 @@ void game_list_frame::OnParsingFinished()
 				return;
 			}
 
-			game.serial = dir_or_elf.substr(dir_or_elf.find_last_of(fs::delim) + 1);
-			game.category = cat::cat_ps3_os.toStdString(); // Key for operating system executables
-			game.version = utils::get_firmware_version();
-			game.app_ver = game.version;
-			game.fw = game.version;
-			game.bootable = 1;
-			game.icon_path = dev_flash + "vsh/resource/explore/icon/icon_home.png";
+			game.info.serial = dir_or_elf.substr(dir_or_elf.find_last_of(fs::delim) + 1);
+			game.info.category = cat::cat_ps3_os.toStdString(); // Key for operating system executables
+			game.info.version = utils::get_firmware_version();
+			game.info.app_ver = game.info.version;
+			game.info.fw = game.info.version;
+			game.info.bootable = 1;
+			game.info.icon_path = dev_flash + "vsh/resource/explore/icon/icon_home.png";
 
 			if (dir_or_elf.starts_with(dev_flash))
 			{
@@ -618,56 +606,71 @@ void game_list_frame::OnParsingFinished()
 
 				if (const auto it = thread_localized.title.titles.find(path_vfs); it != thread_localized.title.titles.cend())
 				{
-					game.name = it->second.toStdString();
+					game.info.name = it->second.toStdString();
 				}
 			}
 
-			if (game.name.empty())
+			if (game.info.name.empty())
 			{
-				game.name = game.serial;
+				game.info.name = game.info.serial;
 			}
 		}
 		else
 		{
-			game.serial       = std::string(title_id);
-			game.name         = std::string(psf::get_string(psf, "TITLE", cat_unknown_localized));
-			game.app_ver      = std::string(psf::get_string(psf, "APP_VER", cat_unknown_localized));
-			game.version      = std::string(psf::get_string(psf, "VERSION", cat_unknown_localized));
-			game.category     = std::string(psf::get_string(psf, "CATEGORY", cat_unknown));
-			game.fw           = std::string(psf::get_string(psf, "PS3_SYSTEM_VER", cat_unknown_localized));
-			game.parental_lvl = psf::get_integer(psf, "PARENTAL_LEVEL", 0);
-			game.resolution   = psf::get_integer(psf, "RESOLUTION", 0);
-			game.sound_format = psf::get_integer(psf, "SOUND_FORMAT", 0);
-			game.bootable     = psf::get_integer(psf, "BOOTABLE", 0);
-			game.attr         = psf::get_integer(psf, "ATTRIBUTE", 0);
-			game.icon_path    = sfo_dir + "/ICON0.PNG";
-			game.movie_path   = sfo_dir + "/ICON1.PAM";
+			std::string_view name = psf::get_string(psf, localized_title);
+			if (name.empty()) name = psf::get_string(psf, "TITLE", cat_unknown_localized);
 
-			if (game.category == "DG")
-			{
-				const std::string game_data_dir = _hdd + "game/" + game.serial;
-
-				if (std::string latest_icon = game_data_dir + "/ICON0.PNG"; fs::is_file(latest_icon))
-				{
-					game.icon_path = std::move(latest_icon);
-				}
-
-				if (std::string latest_movie = game_data_dir + "/ICON1.PAM"; fs::is_file(latest_movie))
-				{
-					game.movie_path = std::move(latest_movie);
-				}
-			}
+			game.info.serial       = std::string(title_id);
+			game.info.name         = std::string(name);
+			game.info.app_ver      = std::string(psf::get_string(psf, "APP_VER", cat_unknown_localized));
+			game.info.version      = std::string(psf::get_string(psf, "VERSION", cat_unknown_localized));
+			game.info.category     = std::string(psf::get_string(psf, "CATEGORY", cat_unknown));
+			game.info.fw           = std::string(psf::get_string(psf, "PS3_SYSTEM_VER", cat_unknown_localized));
+			game.info.parental_lvl = psf::get_integer(psf, "PARENTAL_LEVEL", 0);
+			game.info.resolution   = psf::get_integer(psf, "RESOLUTION", 0);
+			game.info.sound_format = psf::get_integer(psf, "SOUND_FORMAT", 0);
+			game.info.bootable     = psf::get_integer(psf, "BOOTABLE", 0);
+			game.info.attr         = psf::get_integer(psf, "ATTRIBUTE", 0);
 		}
 
 		if (show_custom_icons)
 		{
-			if (std::string icon_path = game_icon_path + game.serial + "/ICON0.PNG"; fs::is_file(icon_path))
+			if (std::string icon_path = game_icon_path + game.info.serial + "/ICON0.PNG"; fs::is_file(icon_path))
 			{
-				game.icon_path = std::move(icon_path);
+				game.info.icon_path = std::move(icon_path);
+				game.has_custom_icon = true;
 			}
 		}
 
-		const QString serial = qstr(game.serial);
+		if (game.info.icon_path.empty())
+		{
+			if (std::string icon_path = sfo_dir + "/" + localized_icon; fs::is_file(icon_path))
+			{
+				game.info.icon_path = std::move(icon_path);
+			}
+			else
+			{
+				game.info.icon_path = sfo_dir + "/ICON0.PNG";
+			}
+		}
+
+		if (std::string movie_path = game_icon_path + game.info.serial + "/hover.gif"; fs::is_file(movie_path))
+		{
+			game.info.movie_path = std::move(movie_path);
+			game.has_hover_gif = true;
+		}
+		else if (std::string movie_path = sfo_dir + "/" + localized_movie; fs::is_file(movie_path))
+		{
+			game.info.movie_path = std::move(movie_path);
+			game.has_hover_pam = true;
+		}
+		else if (std::string movie_path = sfo_dir + "/ICON1.PAM"; fs::is_file(movie_path))
+		{
+			game.info.movie_path = std::move(movie_path);
+			game.has_hover_pam = true;
+		}
+
+		const QString serial = QString::fromStdString(game.info.serial);
 
 		m_games_mutex.lock();
 
@@ -699,7 +702,7 @@ void game_list_frame::OnParsingFinished()
 
 		m_games_mutex.unlock();
 
-		QString qt_cat = qstr(game.category);
+		QString qt_cat = QString::fromStdString(game.info.category);
 
 		if (const auto boot_cat = thread_localized.category.cat_boot.find(qt_cat); boot_cat != thread_localized.category.cat_boot.cend())
 		{
@@ -709,7 +712,7 @@ void game_list_frame::OnParsingFinished()
 		{
 			qt_cat = data_cat->second;
 		}
-		else if (game.category == cat_unknown)
+		else if (game.info.category == cat_unknown)
 		{
 			qt_cat = thread_localized.category.unknown;
 		}
@@ -718,22 +721,12 @@ void game_list_frame::OnParsingFinished()
 			qt_cat = thread_localized.category.other;
 		}
 
-		gui_game_info info{};
-		info.info = std::move(game);
-		info.localized_category = std::move(qt_cat);
-		info.compat = m_game_compat->GetCompatibility(info.info.serial);
-		info.hasCustomConfig = fs::is_file(rpcs3::utils::get_custom_config_path(info.info.serial));
-		info.hasCustomPadConfig = fs::is_file(rpcs3::utils::get_custom_input_config_path(info.info.serial));
-		info.has_hover_gif = fs::is_file(game_icon_path + info.info.serial + "/hover.gif");
-		info.has_hover_pam = fs::is_file(info.info.movie_path);
+		game.localized_category = std::move(qt_cat);
+		game.compat = m_game_compat->GetCompatibility(game.info.serial);
+		game.has_custom_config = fs::is_file(rpcs3::utils::get_custom_config_path(game.info.serial));
+		game.has_custom_pad_config = fs::is_file(rpcs3::utils::get_custom_input_config_path(game.info.serial));
 
-		// Free some memory
-		if (!info.has_hover_pam)
-		{
-			info.info.movie_path.clear();
-		}
-
-		m_games.push(std::make_shared<gui_game_info>(std::move(info)));
+		m_games.push(std::make_shared<gui_game_info>(std::move(game)));
 	};
 
 	const auto add_disc_dir = [this](const std::string& path, std::vector<std::string>& legit_paths)
@@ -842,47 +835,64 @@ void game_list_frame::OnRefreshFinished()
 
 	const Localized localized;
 	const std::string cat_unknown_localized = localized.category.unknown.toStdString();
+	const s32 language_index = gui_application::get_language_id();
+	const std::string localized_icon = fmt::format("ICON0_%02d.PNG", language_index);
+	const std::string localized_movie = fmt::format("ICON1_%02d.PAM", language_index);
 
 	// Try to update the app version for disc games if there is a patch
-	for (const auto& entry : m_game_data)
+	// Also try to find updated game icons and movies
+	for (const game_info& entry : m_game_data)
 	{
-		if (entry->info.category == "DG")
+		if (entry->info.category != "DG") continue;
+
+		for (const auto& other : m_game_data)
 		{
-			for (const auto& other : m_game_data)
+			if (other->info.category == "DG") continue;
+			if (entry->info.serial != other->info.serial) continue;
+
+			// The patch is game data and must have the same serial and an app version
+			if (other->info.app_ver != cat_unknown_localized)
 			{
-				// The patch is game data and must have the same serial and an app version
-				static constexpr auto version_is_bigger = [](const std::string& v0, const std::string& v1, const std::string& serial, bool is_fw)
+				// Update the app version if it's higher than the disc's version (old games may not have an app version)
+				if (entry->info.app_ver == cat_unknown_localized || rpcs3::utils::version_is_bigger(other->info.app_ver, entry->info.app_ver, entry->info.serial, false))
 				{
-					std::add_pointer_t<char> ev0, ev1;
-					const double ver0 = std::strtod(v0.c_str(), &ev0);
-					const double ver1 = std::strtod(v1.c_str(), &ev1);
-
-					if (v0.c_str() + v0.size() == ev0 && v1.c_str() + v1.size() == ev1)
-					{
-						return ver0 > ver1;
-					}
-
-					game_list_log.error("Failed to update the displayed %s numbers for title ID %s\n'%s'-'%s'", is_fw ? "firmware version" : "version", serial, v0, v1);
-					return false;
-				};
-
-				if (entry->info.serial == other->info.serial && other->info.category != "DG" && other->info.app_ver != cat_unknown_localized)
+					entry->info.app_ver = other->info.app_ver;
+				}
+				// Update the firmware version if possible and if it's higher than the disc's version
+				if (other->info.fw != cat_unknown_localized && rpcs3::utils::version_is_bigger(other->info.fw, entry->info.fw, entry->info.serial, true))
 				{
-					// Update the app version if it's higher than the disc's version (old games may not have an app version)
-					if (entry->info.app_ver == cat_unknown_localized || version_is_bigger(other->info.app_ver, entry->info.app_ver, entry->info.serial, true))
-					{
-						entry->info.app_ver = other->info.app_ver;
-					}
-					// Update the firmware version if possible and if it's higher than the disc's version
-					if (other->info.fw != cat_unknown_localized && version_is_bigger(other->info.fw, entry->info.fw, entry->info.serial, false))
-					{
-						entry->info.fw = other->info.fw;
-					}
-					// Update the parental level if possible and if it's higher than the disc's level
-					if (other->info.parental_lvl != 0 && other->info.parental_lvl > entry->info.parental_lvl)
-					{
-						entry->info.parental_lvl = other->info.parental_lvl;
-					}
+					entry->info.fw = other->info.fw;
+				}
+				// Update the parental level if possible and if it's higher than the disc's level
+				if (other->info.parental_lvl != 0 && other->info.parental_lvl > entry->info.parental_lvl)
+				{
+					entry->info.parental_lvl = other->info.parental_lvl;
+				}
+			}
+
+			// Let's fetch the game data icon if preferred or if the path was empty for some reason
+			if ((m_prefer_game_data_icons && !entry->has_custom_icon) || entry->info.icon_path.empty())
+			{
+				if (std::string icon_path = other->info.path + "/" + localized_icon; fs::is_file(icon_path))
+				{
+					entry->info.icon_path = std::move(icon_path);
+				}
+				else if (std::string icon_path = other->info.path + "/ICON0.PNG"; fs::is_file(icon_path))
+				{
+					entry->info.icon_path = std::move(icon_path);
+				}
+			}
+
+			// Let's fetch the game data movie if preferred or if the path was empty
+			if (m_prefer_game_data_icons || entry->info.movie_path.empty())
+			{
+				if (std::string movie_path = other->info.path + "/" + localized_movie; fs::is_file(movie_path))
+				{
+					entry->info.movie_path = std::move(movie_path);
+				}
+				else if (std::string movie_path = other->info.path + "/ICON1.PAM"; fs::is_file(movie_path))
+				{
+					entry->info.movie_path = std::move(movie_path);
 				}
 			}
 		}
@@ -994,108 +1004,120 @@ void game_list_frame::ItemSelectionChangedSlot()
 	Q_EMIT NotifyGameSelection(game);
 }
 
-void game_list_frame::CreateShortcuts(const game_info& gameinfo, const std::set<gui::utils::shortcut_location>& locations)
+void game_list_frame::CreateShortcuts(const std::vector<game_info>& games, const std::set<gui::utils::shortcut_location>& locations)
 {
-	if (locations.empty())
+	if (games.empty())
 	{
-		game_list_log.error("Failed to create shortcuts for %s. No locations selected.", qstr(gameinfo->info.name).simplified());
+		game_list_log.notice("Skip creating shortcuts. No games selected.");
 		return;
 	}
 
-	std::string gameid_token_value;
-
-	const std::string dev_flash = g_cfg_vfs.get_dev_flash();
-
-	if (gameinfo->info.category == "DG" && !fs::is_file(rpcs3::utils::get_hdd0_dir() + "/game/" + gameinfo->info.serial + "/USRDIR/EBOOT.BIN"))
+	if (locations.empty())
 	{
-		const usz ps3_game_dir_pos = fs::get_parent_dir(gameinfo->info.path).size();
-		std::string relative_boot_dir = gameinfo->info.path.substr(ps3_game_dir_pos);
-
-		if (usz char_pos = relative_boot_dir.find_first_not_of(fs::delim); char_pos != umax)
-		{
-			relative_boot_dir = relative_boot_dir.substr(char_pos);
-		}
-		else
-		{
-			relative_boot_dir.clear();
-		}
-
-		if (!relative_boot_dir.empty())
-		{
-			if (relative_boot_dir != "PS3_GAME")
-			{
-				gameid_token_value = gameinfo->info.serial + "/" + relative_boot_dir;
-			}
-			else
-			{
-				gameid_token_value = gameinfo->info.serial;
-			}
-		}
-	}
-	else
-	{
-		gameid_token_value = gameinfo->info.serial;
-	}
-
-#ifdef __linux__
-	const std::string target_cli_args = gameinfo->info.path.starts_with(dev_flash) ? fmt::format("--no-gui \"%%%%RPCS3_VFS%%%%:dev_flash/%s\"", gameinfo->info.path.substr(dev_flash.size()))
-											: fmt::format("--no-gui \"%%%%RPCS3_GAMEID%%%%:%s\"", gameid_token_value);
-#else
-	const std::string target_cli_args = gameinfo->info.path.starts_with(dev_flash) ? fmt::format("--no-gui \"%%RPCS3_VFS%%:dev_flash/%s\"", gameinfo->info.path.substr(dev_flash.size()))
-											: fmt::format("--no-gui \"%%RPCS3_GAMEID%%:%s\"", gameid_token_value);
-#endif
-	const std::string target_icon_dir = fmt::format("%sIcons/game_icons/%s/", fs::get_config_dir(), gameinfo->info.serial);
-
-	if (!fs::create_path(target_icon_dir))
-	{
-		game_list_log.error("Failed to create shortcut path %s (%s)", qstr(gameinfo->info.name).simplified(), target_icon_dir, fs::g_tls_error);
+		game_list_log.error("Failed to create shortcuts. No locations selected.");
 		return;
 	}
 
 	bool success = true;
 
-	for (const gui::utils::shortcut_location& location : locations)
+	for (const game_info& gameinfo : games)
 	{
-		std::string destination;
+		std::string gameid_token_value;
 
-		switch (location)
-		{
-		case gui::utils::shortcut_location::desktop:
-			destination = "desktop";
-			break;
-		case gui::utils::shortcut_location::applications:
-			destination = "application menu";
-			break;
-#ifdef _WIN32
-		case gui::utils::shortcut_location::rpcs3_shortcuts:
-			destination = "/games/shortcuts/";
-			break;
-#endif
-		}
+		const std::string dev_flash = g_cfg_vfs.get_dev_flash();
 
-		if (!gameid_token_value.empty() && gui::utils::create_shortcut(gameinfo->info.name, gameinfo->info.serial, target_cli_args, gameinfo->info.name, gameinfo->info.icon_path, target_icon_dir, location))
+		if (gameinfo->info.category == "DG" && !fs::is_file(rpcs3::utils::get_hdd0_dir() + "/game/" + gameinfo->info.serial + "/USRDIR/EBOOT.BIN"))
 		{
-			game_list_log.success("Created %s shortcut for %s", destination, qstr(gameinfo->info.name).simplified());
+			const usz ps3_game_dir_pos = fs::get_parent_dir(gameinfo->info.path).size();
+			std::string relative_boot_dir = gameinfo->info.path.substr(ps3_game_dir_pos);
+
+			if (usz char_pos = relative_boot_dir.find_first_not_of(fs::delim); char_pos != umax)
+			{
+				relative_boot_dir = relative_boot_dir.substr(char_pos);
+			}
+			else
+			{
+				relative_boot_dir.clear();
+			}
+
+			if (!relative_boot_dir.empty())
+			{
+				if (relative_boot_dir != "PS3_GAME")
+				{
+					gameid_token_value = gameinfo->info.serial + "/" + relative_boot_dir;
+				}
+				else
+				{
+					gameid_token_value = gameinfo->info.serial;
+				}
+			}
 		}
 		else
 		{
-			game_list_log.error("Failed to create %s shortcut for %s", destination, qstr(gameinfo->info.name).simplified());
+			gameid_token_value = gameinfo->info.serial;
+		}
+
+#ifdef __linux__
+		const std::string target_cli_args = gameinfo->info.path.starts_with(dev_flash) ? fmt::format("--no-gui \"%%%%RPCS3_VFS%%%%:dev_flash/%s\"", gameinfo->info.path.substr(dev_flash.size()))
+		                                                                               : fmt::format("--no-gui \"%%%%RPCS3_GAMEID%%%%:%s\"", gameid_token_value);
+#else
+		const std::string target_cli_args = gameinfo->info.path.starts_with(dev_flash) ? fmt::format("--no-gui \"%%RPCS3_VFS%%:dev_flash/%s\"", gameinfo->info.path.substr(dev_flash.size()))
+		                                                                               : fmt::format("--no-gui \"%%RPCS3_GAMEID%%:%s\"", gameid_token_value);
+#endif
+		const std::string target_icon_dir = fmt::format("%sIcons/game_icons/%s/", fs::get_config_dir(), gameinfo->info.serial);
+
+		if (!fs::create_path(target_icon_dir))
+		{
+			game_list_log.error("Failed to create shortcut path %s (%s)", qstr(gameinfo->info.name).simplified(), target_icon_dir, fs::g_tls_error);
 			success = false;
+			continue;
+		}
+
+		for (const gui::utils::shortcut_location& location : locations)
+		{
+			std::string destination;
+
+			switch (location)
+			{
+			case gui::utils::shortcut_location::desktop:
+				destination = "desktop";
+				break;
+			case gui::utils::shortcut_location::applications:
+				destination = "application menu";
+				break;
+#ifdef _WIN32
+			case gui::utils::shortcut_location::rpcs3_shortcuts:
+				destination = "/games/shortcuts/";
+				break;
+#endif
+			}
+
+			if (!gameid_token_value.empty() && gui::utils::create_shortcut(gameinfo->info.name, gameinfo->info.serial, target_cli_args, gameinfo->info.name, gameinfo->info.icon_path, target_icon_dir, location))
+			{
+				game_list_log.success("Created %s shortcut for %s", destination, qstr(gameinfo->info.name).simplified());
+			}
+			else
+			{
+				game_list_log.error("Failed to create %s shortcut for %s", destination, qstr(gameinfo->info.name).simplified());
+				success = false;
+			}
 		}
 	}
 
 #ifdef _WIN32
-	if (locations.size() > 1 || !locations.contains(gui::utils::shortcut_location::rpcs3_shortcuts))
-#endif
+	if (locations.size() == 1 && locations.contains(gui::utils::shortcut_location::rpcs3_shortcuts))
 	{
-		if (success)
-		{
-			QMessageBox::information(this, tr("Success!"), tr("Successfully created shortcut(s)."));
-		}
-		else
-		{
-			QMessageBox::warning(this, tr("Warning!"), tr("Failed to create shortcut(s)!"));
-		}
+		return;
+	}
+#endif
+
+	if (success)
+	{
+		QMessageBox::information(this, tr("Success!"), tr("Successfully created shortcut(s)."));
+	}
+	else
+	{
+		QMessageBox::warning(this, tr("Warning!"), tr("Failed to create one or more shortcuts!"));
 	}
 }
 
@@ -1138,7 +1160,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 
 	const bool is_current_running_game = is_game_running(current_game.serial);
 
-	QAction* boot = new QAction(gameinfo->hasCustomConfig
+	QAction* boot = new QAction(gameinfo->has_custom_config
 		? (is_current_running_game
 			? tr("&Reboot with global configuration")
 			: tr("&Boot with global configuration"))
@@ -1149,7 +1171,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	QFont font = boot->font();
 	font.setBold(true);
 
-	if (gameinfo->hasCustomConfig)
+	if (gameinfo->has_custom_config)
 	{
 		QAction* boot_custom = menu.addAction(is_current_running_game
 			? tr("&Reboot with custom configuration")
@@ -1197,9 +1219,9 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		});
 	}
 
-	extern bool is_savestate_compatible(fs::file&& file, std::string_view filepath);
+	extern bool is_savestate_compatible(const std::string& filepath);
 
-	if (const std::string sstate = get_savestate_file(current_game.serial, current_game.path, 0, 0); is_savestate_compatible(fs::file(sstate), sstate))
+	if (const std::string sstate = get_savestate_file(current_game.serial, current_game.path, 0, 0); is_savestate_compatible(sstate))
 	{
 		QAction* boot_state = menu.addAction(is_current_running_game
 			? tr("&Reboot with savestate")
@@ -1213,12 +1235,12 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 
 	menu.addSeparator();
 
-	QAction* configure = menu.addAction(gameinfo->hasCustomConfig
+	QAction* configure = menu.addAction(gameinfo->has_custom_config
 		? tr("&Change Custom Configuration")
 		: tr("&Create Custom Configuration From Global Settings"));
-	QAction* create_game_default_config = gameinfo->hasCustomConfig ? nullptr
+	QAction* create_game_default_config = gameinfo->has_custom_config ? nullptr
 		: menu.addAction(tr("&Create Custom Configuration From Default Settings"));
-	QAction* pad_configure = menu.addAction(gameinfo->hasCustomPadConfig
+	QAction* pad_configure = menu.addAction(gameinfo->has_custom_pad_config
 		? tr("&Change Custom Gamepad Configuration")
 		: tr("&Create Custom Gamepad Configuration"));
 	QAction* configure_patches = menu.addAction(tr("&Manage Game Patches"));
@@ -1230,7 +1252,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	// Remove menu
 	QMenu* remove_menu = menu.addMenu(tr("&Remove"));
 
-	if (gameinfo->hasCustomConfig)
+	if (gameinfo->has_custom_config)
 	{
 		QAction* remove_custom_config = remove_menu->addAction(tr("&Remove Custom Configuration"));
 		connect(remove_custom_config, &QAction::triggered, [this, current_game, gameinfo]()
@@ -1241,7 +1263,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			}
 		});
 	}
-	if (gameinfo->hasCustomPadConfig)
+	if (gameinfo->has_custom_pad_config)
 	{
 		QAction* remove_custom_pad_config = remove_menu->addAction(tr("&Remove Custom Gamepad Configuration"));
 		connect(remove_custom_pad_config, &QAction::triggered, [this, current_game, gameinfo]()
@@ -1315,14 +1337,14 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	{
 		remove_menu->addSeparator();
 
-		QAction* remove_savestate = remove_menu->addAction(tr("&Remove Savestate"));
+		QAction* remove_savestate = remove_menu->addAction(tr("&Remove Savestates"));
 		remove_savestate->setEnabled(!is_current_running_game);
 		connect(remove_savestate, &QAction::triggered, [this, current_game, savestate_dir]()
 		{
 			if (is_game_running(current_game.serial))
 				return;
 
-			if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove savestate?")) != QMessageBox::Yes)
+			if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove savestates?")) != QMessageBox::Yes)
 				return;
 
 			RemoveContentPath(savestate_dir, "savestate");
@@ -1341,7 +1363,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	QAction* create_desktop_shortcut = manage_game_menu->addAction(tr("&Create Desktop Shortcut"));
 	connect(create_desktop_shortcut, &QAction::triggered, this, [this, gameinfo]()
 	{
-		CreateShortcuts(gameinfo, {gui::utils::shortcut_location::desktop});
+		CreateShortcuts({gameinfo}, {gui::utils::shortcut_location::desktop});
 	});
 #ifdef _WIN32
 	QAction* create_start_menu_shortcut = manage_game_menu->addAction(tr("&Create Start Menu Shortcut"));
@@ -1352,7 +1374,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 #endif
 	connect(create_start_menu_shortcut, &QAction::triggered, this, [this, gameinfo]()
 	{
-		CreateShortcuts(gameinfo, {gui::utils::shortcut_location::applications});
+		CreateShortcuts({gameinfo}, {gui::utils::shortcut_location::applications});
 	});
 
 	manage_game_menu->addSeparator();
@@ -1558,7 +1580,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		});
 	}
 
-	if (gameinfo->hasCustomConfig)
+	if (gameinfo->has_custom_config)
 	{
 		QAction* open_config_dir = open_folder_menu->addAction(tr("&Open Custom Config Folder"));
 		connect(open_config_dir, &QAction::triggered, [current_game]()
@@ -1645,9 +1667,9 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 
 		connect(&dlg, &settings_dialog::EmuSettingsApplied, [this, gameinfo]()
 		{
-			if (!gameinfo->hasCustomConfig)
+			if (!gameinfo->has_custom_config)
 			{
-				gameinfo->hasCustomConfig = true;
+				gameinfo->has_custom_config = true;
 				ShowCustomConfigIcon(gameinfo);
 			}
 			Q_EMIT NotifyEmuSettingsChange();
@@ -1670,9 +1692,9 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	{
 		pad_settings_dialog dlg(m_gui_settings, this, &current_game);
 
-		if (dlg.exec() == QDialog::Accepted && !gameinfo->hasCustomPadConfig)
+		if (dlg.exec() == QDialog::Accepted && !gameinfo->has_custom_pad_config)
 		{
-			gameinfo->hasCustomPadConfig = true;
+			gameinfo->has_custom_pad_config = true;
 			ShowCustomConfigIcon(gameinfo);
 		}
 	});
@@ -1768,7 +1790,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		QCheckBox* disc = new QCheckBox(tr("Remove title from game list (Disc Game path is not removed!)"));
 		QCheckBox* caches = new QCheckBox(tr("Remove caches and custom configs"));
 		QCheckBox* icons = new QCheckBox(tr("Remove icons and shortcuts"));
-		QCheckBox* savestate = new QCheckBox(tr("Remove savestate"));
+		QCheckBox* savestate = new QCheckBox(tr("Remove savestates"));
 		QCheckBox* captures = new QCheckBox(tr("Remove captures"));
 		QCheckBox* recordings = new QCheckBox(tr("Remove recordings"));
 		QCheckBox* screenshots = new QCheckBox(tr("Remove screenshots"));
@@ -1878,15 +1900,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	});
 	connect(configure_patches, &QAction::triggered, this, [this, gameinfo]()
 	{
-		std::unordered_map<std::string, std::set<std::string>> games;
-		for (const auto& game : m_game_data)
-		{
-			if (game)
-			{
-				games[game->info.serial].insert(game_list::GetGameVersion(game));
-			}
-		}
-		patch_manager_dialog patch_manager(m_gui_settings, games, gameinfo->info.serial, game_list::GetGameVersion(gameinfo), this);
+		patch_manager_dialog patch_manager(m_gui_settings, m_game_data, gameinfo->info.serial, gameinfo->GetGameVersion(), this);
 		patch_manager.exec();
 	});
 	connect(check_compat, &QAction::triggered, this, [serial]
@@ -2019,7 +2033,7 @@ bool game_list_frame::RemoveCustomConfiguration(const std::string& title_id, con
 		{
 			if (game)
 			{
-				game->hasCustomConfig = false;
+				game->has_custom_config = false;
 			}
 			game_list_log.success("Removed configuration file: %s", path);
 		}
@@ -2062,7 +2076,7 @@ bool game_list_frame::RemoveCustomPadConfiguration(const std::string& title_id, 
 	{
 		if (game)
 		{
-			game->hasCustomPadConfig = false;
+			game->has_custom_pad_config = false;
 		}
 		if (!Emu.IsStopped(true) && Emu.GetTitleID() == title_id)
 		{
@@ -2277,10 +2291,12 @@ void game_list_frame::RemoveHDD1Cache(const std::string& base_dir, const std::st
 		game_list_log.fatal("Only %d/%d HDD1 cache directories could be removed in %s (%s)", dirs_removed, dirs_total, base_dir, title_id);
 }
 
-void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set<std::string>& serials, QString progressLabel, std::function<bool(const std::string&)> action, std::function<void(u32, u32)> cancel_log, bool refresh_on_finish,  bool can_be_concurrent, std::function<bool()> should_wait_cb)
+void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set<std::string>& serials, QString progressLabel, std::function<bool(const std::string&)> action, std::function<void(u32, u32)> cancel_log, bool refresh_on_finish, bool can_be_concurrent, std::function<bool()> should_wait_cb)
 {
 	// Concurrent tasks should not wait (at least not in current implementation)
 	ensure(!should_wait_cb || !can_be_concurrent);
+
+	g_system_progress_canceled = false;
 
 	const std::shared_ptr<std::function<bool(int)>> iterate_over_serial = std::make_shared<std::function<bool(int)>>();
 
@@ -2297,12 +2313,16 @@ void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set
 
 		const std::string& serial = *std::next(serials.begin(), index);
 
-		if (pdlg->wasCanceled() || g_system_progress_canceled)
+		if (pdlg->wasCanceled() || g_system_progress_canceled.exchange(false))
 		{
-			cancel_log(index, serials_size);
+			if (cancel_log)
+			{
+				cancel_log(index, serials_size);
+			}
 			return false;
 		}
-		else if (action(serial))
+
+		if (action(serial))
 		{
 			const int done = index_ptr->load();
 			pdlg->setLabelText(progressLabel.arg(done + 1).arg(serials_size));
@@ -2330,7 +2350,7 @@ void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set
 
 		connect(future_watcher, &QFutureWatcher<void>::finished, this, [=, this]()
 		{
-			pdlg->setLabelText(progressLabel.arg(*index).arg(serials_size));
+			pdlg->setLabelText(progressLabel.arg(index->load()).arg(serials_size));
 			pdlg->setCancelButtonText(tr("OK"));
 			QApplication::beep();
 
@@ -2360,19 +2380,17 @@ void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set
 		if ((*iterate_over_serial)(*index))
 		{
 			QTimer::singleShot(1, this, *periodic_func);
+			return;
 		}
-		else
+
+		pdlg->setLabelText(progressLabel.arg(index->load()).arg(serials_size));
+		pdlg->setCancelButtonText(tr("OK"));
+		connect(pdlg, &progress_dialog::canceled, this, [pdlg](){ pdlg->deleteLater(); });
+		QApplication::beep();
+
+		if (refresh_on_finish && index)
 		{
-			pdlg->setLabelText(progressLabel.arg(*index).arg(serials_size));
-			pdlg->setCancelButtonText(tr("OK"));
-			QApplication::beep();
-
-			if (refresh_on_finish && index)
-			{
-				Refresh(true);
-			}
-
-			pdlg->deleteLater();
+			Refresh(true);
 		}
 	};
 
@@ -2413,6 +2431,14 @@ void game_list_frame::BatchCreateCPUCaches(const std::vector<game_info>& game_da
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
 	pdlg->open();
+
+	connect(pdlg, &progress_dialog::canceled, this, []()
+	{
+		if (!Emu.IsStopped())
+		{
+			Emu.GracefulShutdown(false, true);
+		}
+	});
 
 	BatchActionBySerials(pdlg, serials, tr("%0\nProgress: %1/%2 caches compiled").arg(main_label),
 	[&, game_data](const std::string& serial)
@@ -2522,7 +2548,7 @@ void game_list_frame::BatchRemoveCustomConfigurations()
 	std::set<std::string> serials;
 	for (const auto& game : m_game_data)
 	{
-		if (game->hasCustomConfig && !serials.count(game->info.serial))
+		if (game->has_custom_config && !serials.count(game->info.serial))
 		{
 			serials.emplace(game->info.serial);
 		}
@@ -2557,7 +2583,7 @@ void game_list_frame::BatchRemoveCustomPadConfigurations()
 	std::set<std::string> serials;
 	for (const auto& game : m_game_data)
 	{
-		if (game->hasCustomPadConfig && !serials.count(game->info.serial))
+		if (game->has_custom_pad_config && !serials.count(game->info.serial))
 		{
 			serials.emplace(game->info.serial);
 		}
@@ -2633,15 +2659,15 @@ void game_list_frame::ShowCustomConfigIcon(const game_info& game)
 	}
 
 	const std::string serial         = game->info.serial;
-	const bool has_custom_config     = game->hasCustomConfig;
-	const bool has_custom_pad_config = game->hasCustomPadConfig;
+	const bool has_custom_config     = game->has_custom_config;
+	const bool has_custom_pad_config = game->has_custom_pad_config;
 
 	for (const auto& other_game : m_game_data)
 	{
 		if (other_game->info.serial == serial)
 		{
-			other_game->hasCustomConfig    = has_custom_config;
-			other_game->hasCustomPadConfig = has_custom_pad_config;
+			other_game->has_custom_config     = has_custom_config;
+			other_game->has_custom_pad_config = has_custom_pad_config;
 		}
 	}
 
@@ -2959,6 +2985,16 @@ void game_list_frame::SetShowCompatibilityInGrid(bool show)
 	m_draw_compat_status_to_grid = show;
 	RepaintIcons();
 	m_gui_settings->SetValue(gui::gl_draw_compat, show);
+}
+
+void game_list_frame::SetPreferGameDataIcons(bool enabled)
+{
+	if (m_prefer_game_data_icons != enabled)
+	{
+		m_prefer_game_data_icons = enabled;
+		m_gui_settings->SetValue(gui::gl_pref_gd_icon, enabled);
+		Refresh(true);
+	}
 }
 
 void game_list_frame::SetShowCustomIcons(bool show)

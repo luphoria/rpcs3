@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.16.9)
+cmake_minimum_required(VERSION 3.28)
 
 project(rpcs3 LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
@@ -30,6 +31,10 @@ option(USE_SYSTEM_FFMPEG "Prefer system ffmpeg instead of the prebuild one" OFF)
 option(USE_SYSTEM_OPENAL "Prefer system OpenAL instead of the prebuild one" ON)
 option(USE_SYSTEM_CURL "Prefer system Curl instead of the prebuild one" ON)
 option(USE_SYSTEM_OPENCV "Prefer system OpenCV instead of the builtin one" ON)
+option(HAS_MEMORY_BREAKPOINTS "Add support for memory breakpoints to the interpreter" OFF)
+option(USE_LTO "Use LTO for building" ON)
+option(BUILD_RPCS3_TESTS "Build RPCS3 unit tests." OFF)
+option(RUN_RPCS3_TESTS "Run RPCS3 unit tests. Requires BUILD_RPCS3_TESTS" OFF)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/buildfiles/cmake")
 

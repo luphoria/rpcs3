@@ -1,7 +1,8 @@
 #include "device.h"
-#include "instance.hpp"
+#include "instance.h"
 #include "util/logs.hpp"
 #include "Emu/system_config.h"
+#include <vulkan/vulkan_core.h>
 
 namespace vk
 {
@@ -36,6 +37,7 @@ namespace vk
 			VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_info{};
 			VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
 			VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
+			VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_info{};
 
 			if (device_extensions.is_supported(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
 			{
@@ -86,6 +88,13 @@ namespace vk
 				features2.pNext         = &device_fault_info;
 			}
 
+			if (device_extensions.is_supported(VK_EXT_MULTI_DRAW_EXTENSION_NAME))
+			{
+				multidraw_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT;
+				multidraw_info.pNext = features2.pNext;
+				features2.pNext      = &multidraw_info;
+			}
+
 			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceFeatures2KHR"));
 			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
 			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
@@ -97,6 +106,9 @@ namespace vk
 			custom_border_color_support.supported = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
 			custom_border_color_support.swizzle_extension_supported = border_color_swizzle_info.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
 			custom_border_color_support.require_border_color_remap = !border_color_swizzle_info.borderColorSwizzleFromImage;
+
+			multidraw_support.supported = !!multidraw_info.multiDraw;
+			multidraw_support.max_batch_size = 65536;
 
 			optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
 			optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
@@ -134,15 +146,61 @@ namespace vk
 			// So far only AMD is known to remap image view and border color together. Mark as not required.
 			custom_border_color_support.require_border_color_remap = get_driver_vendor() != driver_vendor::AMD;
 		}
+
+		// v3dv and PanVK support BC1-BC3 which is all we require, support is reported as false since not all formats are supported
+		optional_features_support.texture_compression_bc = features.textureCompressionBC
+				|| get_driver_vendor() == driver_vendor::V3DV || get_driver_vendor() == driver_vendor::PANVK;
+
+		// Texel buffer UAB is reported to the trigger for some driver crashes on older NV cards
+		if (get_driver_vendor() == driver_vendor::NVIDIA &&
+			get_chip_class() >= chip_class::NV_kepler &&
+			get_chip_class() <= chip_class::NV_pascal)
+		{
+			// UBOs are unsupported on these cards anyway, disable texel buffers as well
+			descriptor_indexing_support.update_after_bind_mask &= ~(1ull << VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+		}
 	}
 
-	void physical_device::get_physical_device_properties(bool allow_extensions)
+	void physical_device::get_physical_device_properties_0(bool allow_extensions)
 	{
+		// Core properties only
 		vkGetPhysicalDeviceMemoryProperties(dev, &memory_properties);
+		vkGetPhysicalDeviceProperties(dev, &props);
 
 		if (!allow_extensions)
 		{
-			vkGetPhysicalDeviceProperties(dev, &props);
+			return;
+		}
+
+		// Try to query driver properties if possible
+		supported_extensions instance_extensions(supported_extensions::instance);
+		supported_extensions device_extensions(supported_extensions::device, nullptr, dev);
+
+		if (!instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) ||
+			!device_extensions.is_supported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+		{
+			return;
+		}
+
+		VkPhysicalDeviceProperties2KHR properties2;
+		properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+		properties2.pNext = nullptr;
+
+		driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
+		driver_properties.pNext = properties2.pNext;
+		properties2.pNext = &driver_properties;
+
+		auto _vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceProperties2KHR"));
+		ensure(_vkGetPhysicalDeviceProperties2KHR);
+
+		_vkGetPhysicalDeviceProperties2KHR(dev, &properties2);
+	}
+
+	void physical_device::get_physical_device_properties_1(bool allow_extensions)
+	{
+		// Extended properties. Call after checking for features
+		if (!allow_extensions)
+		{
 			return;
 		}
 
@@ -151,48 +209,58 @@ namespace vk
 
 		if (!instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
 		{
-			vkGetPhysicalDeviceProperties(dev, &props);
+			return;
 		}
-		else
+
+		VkPhysicalDeviceProperties2KHR properties2;
+		properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+		properties2.pNext = nullptr;
+
+		VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptor_indexing_props{};
+		VkPhysicalDeviceMultiDrawPropertiesEXT multidraw_props{};
+
+		if (descriptor_indexing_support)
 		{
-			VkPhysicalDeviceProperties2KHR properties2;
-			properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
-			properties2.pNext = nullptr;
+			descriptor_indexing_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT;
+			descriptor_indexing_props.pNext = properties2.pNext;
+			properties2.pNext = &descriptor_indexing_props;
+		}
 
-			VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptor_indexing_props{};
+		if (multidraw_support.supported)
+		{
+			multidraw_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_PROPERTIES_EXT;
+			multidraw_props.pNext = properties2.pNext;
+			properties2.pNext = &multidraw_props;
+		}
 
-			if (descriptor_indexing_support)
+		auto _vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceProperties2KHR"));
+		ensure(_vkGetPhysicalDeviceProperties2KHR);
+
+		_vkGetPhysicalDeviceProperties2KHR(dev, &properties2);
+		props = properties2.properties;
+
+		if (descriptor_indexing_support)
+		{
+			if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 800'000)
 			{
-				descriptor_indexing_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT;
-				descriptor_indexing_props.pNext = properties2.pNext;
-				properties2.pNext = &descriptor_indexing_props;
+				rsx_log.error("Physical device does not support enough descriptors for deferred updates to work effectively. Deferred updates are disabled.");
+				descriptor_indexing_support.update_after_bind_mask = 0;
 			}
-
-			if (device_extensions.is_supported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+			else if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 2'000'000)
 			{
-				driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
-				driver_properties.pNext = properties2.pNext;
-				properties2.pNext = &driver_properties;
+				rsx_log.warning("Physical device reports a low amount of allowed deferred descriptor updates. Draw call threshold will be lowered accordingly.");
+				descriptor_max_draw_calls = 8192;
 			}
+		}
 
-			auto _vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceProperties2KHR"));
-			ensure(_vkGetPhysicalDeviceProperties2KHR);
+		if (multidraw_support.supported)
+		{
+			multidraw_support.max_batch_size = multidraw_props.maxMultiDrawCount;
 
-			_vkGetPhysicalDeviceProperties2KHR(dev, &properties2);
-			props = properties2.properties;
-
-			if (descriptor_indexing_support)
+			if (!multidraw_props.maxMultiDrawCount)
 			{
-				if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 800'000)
-				{
-					rsx_log.error("Physical device does not support enough descriptors for deferred updates to work effectively. Deferred updates are disabled.");
-					descriptor_indexing_support.update_after_bind_mask = 0;
-				}
-				else if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 2'000'000)
-				{
-					rsx_log.warning("Physical device reports a low amount of allowed deferred descriptor updates. Draw call threshold will be lowered accordingly.");
-					descriptor_max_draw_calls = 8192;
-				}
+				rsx_log.error("Physical device reports 0 support maxMultiDraw count. Multidraw support will be disabled.");
+				multidraw_support.supported = false;
 			}
 		}
 	}
@@ -202,8 +270,9 @@ namespace vk
 		dev    = pdev;
 		parent = context;
 
+		get_physical_device_properties_0(allow_extensions);
 		get_physical_device_features(allow_extensions);
-		get_physical_device_properties(allow_extensions);
+		get_physical_device_properties_1(allow_extensions);
 
 		rsx_log.always()("Found Vulkan-compatible GPU: '%s' running on driver %s", get_name(), get_driver_version());
 
@@ -302,6 +371,15 @@ namespace vk
 				return driver_vendor::HONEYKRISP;
 			}
 
+			if (gpu_name.find("Panfrost") != umax)
+			{ // e.g. "Mali-G610 (Panfrost)"
+				return driver_vendor::PANVK;
+			}
+			else if (gpu_name.find("Mali") != umax)
+			{ // e.g. "Mali-G610", hence "else"
+				return driver_vendor::ARM_MALI;
+			}
+
 			return driver_vendor::unknown;
 		}
 		else
@@ -329,6 +407,10 @@ namespace vk
 				return driver_vendor::V3DV;
 			case VK_DRIVER_ID_MESA_HONEYKRISP:
 				return driver_vendor::HONEYKRISP;
+			case VK_DRIVER_ID_MESA_PANVK:
+				return driver_vendor::PANVK;
+			case VK_DRIVER_ID_ARM_PROPRIETARY:
+				return driver_vendor::ARM_MALI;
 			default:
 				// Mobile?
 				return driver_vendor::unknown;
@@ -464,8 +546,7 @@ namespace vk
 		// Enable hardware features manually
 		// Currently we require:
 		// 1. Anisotropic sampling
-		// 2. DXT support
-		// 3. Indexable storage buffers
+		// 2. Indexable storage buffers
 		VkPhysicalDeviceFeatures enabled_features{};
 		if (pgpu->shader_types_support.allow_float16)
 		{
@@ -475,6 +556,11 @@ namespace vk
 		if (pgpu->custom_border_color_support)
 		{
 			requested_extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+		}
+
+		if (pgpu->multidraw_support)
+		{
+			requested_extensions.push_back(VK_EXT_MULTI_DRAW_EXTENSION_NAME);
 		}
 
 		if (pgpu->optional_features_support.conditional_rendering)
@@ -559,7 +645,7 @@ namespace vk
 		// enabled_features.shaderCullDistance = VK_TRUE;  // Alt notation of clip distance
 
 		enabled_features.samplerAnisotropy = VK_TRUE;
-		enabled_features.textureCompressionBC = VK_TRUE;
+		enabled_features.textureCompressionBC = pgpu->optional_features_support.texture_compression_bc;
 		enabled_features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
 
 		// Optionally disable unsupported stuff
@@ -652,13 +738,6 @@ namespace vk
 			enabled_features.logicOp = VK_FALSE;
 		}
 
-		if (!pgpu->features.textureCompressionBC && pgpu->get_driver_vendor() == driver_vendor::V3DV)
-		{
-			// v3dv supports BC1-BC3 which is all we require, support is reported as false since not all formats are supported
-			rsx_log.error("Your GPU running on the V3DV driver does not support full texture block compression. Graphics may not render correctly.");
-			enabled_features.textureCompressionBC = VK_FALSE;
-		}
-
 		VkDeviceCreateInfo device = {};
 		device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		device.pNext = nullptr;
@@ -714,6 +793,15 @@ namespace vk
 			device.pNext = &custom_border_color_features;
 		}
 
+		VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_features{};
+		if (pgpu->multidraw_support)
+		{
+			multidraw_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT;
+			multidraw_features.multiDraw = VK_TRUE;
+			multidraw_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &multidraw_features;
+		}
+
 		VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loop_features{};
 		if (pgpu->optional_features_support.framebuffer_loops)
 		{
@@ -739,7 +827,25 @@ namespace vk
 			device_fault_info.pNext = const_cast<void*>(device.pNext);
 			device_fault_info.deviceFault = VK_TRUE;
 			device_fault_info.deviceFaultVendorBinary = VK_FALSE;
-			device_fault_info.pNext = &device_fault_info;
+			device.pNext = &device_fault_info;
+		}
+
+		VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering_info{};
+		if (pgpu->optional_features_support.conditional_rendering)
+		{
+			conditional_rendering_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT;
+			conditional_rendering_info.pNext = const_cast<void*>(device.pNext);
+			conditional_rendering_info.conditionalRendering = VK_TRUE;
+			device.pNext = &conditional_rendering_info;
+		}
+
+		VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
+		if (pgpu->optional_features_support.barycentric_coords)
+		{
+			shader_barycentric_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+			shader_barycentric_info.pNext = const_cast<void*>(device.pNext);
+			shader_barycentric_info.fragmentShaderBarycentric = VK_TRUE;
+			device.pNext = &shader_barycentric_info;
 		}
 
 		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))
@@ -764,40 +870,9 @@ namespace vk
 			vkGetDeviceQueue(dev, present_queue_idx, 0, &m_present_queue);
 		}
 
-		// Import optional function endpoints
-		if (pgpu->optional_features_support.conditional_rendering)
-		{
-			_vkCmdBeginConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdBeginConditionalRenderingEXT>(vkGetDeviceProcAddr(dev, "vkCmdBeginConditionalRenderingEXT"));
-			_vkCmdEndConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdEndConditionalRenderingEXT>(vkGetDeviceProcAddr(dev, "vkCmdEndConditionalRenderingEXT"));
-		}
-
-		if (pgpu->optional_features_support.debug_utils)
-		{
-			_vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(dev, "vkSetDebugUtilsObjectNameEXT"));
-			_vkQueueInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkQueueInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkQueueInsertDebugUtilsLabelEXT"));
-			_vkCmdInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkCmdInsertDebugUtilsLabelEXT"));
-		}
-
-		if (pgpu->optional_features_support.synchronization_2)
-		{
-			_vkCmdSetEvent2KHR = reinterpret_cast<PFN_vkCmdSetEvent2KHR>(vkGetDeviceProcAddr(dev, "vkCmdSetEvent2KHR"));
-			_vkCmdWaitEvents2KHR = reinterpret_cast<PFN_vkCmdWaitEvents2KHR>(vkGetDeviceProcAddr(dev, "vkCmdWaitEvents2KHR"));
-			_vkCmdPipelineBarrier2KHR = reinterpret_cast<PFN_vkCmdPipelineBarrier2KHR>(vkGetDeviceProcAddr(dev, "vkCmdPipelineBarrier2KHR"));
-		}
-
-		if (pgpu->optional_features_support.extended_device_fault)
-		{
-			_vkGetDeviceFaultInfoEXT = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(vkGetDeviceProcAddr(dev, "vkGetDeviceFaultInfoEXT"));
-		}
-
 		memory_map = vk::get_memory_mapping(pdev);
 		m_formats_support = vk::get_optimal_tiling_supported_formats(pdev);
 		m_pipeline_binding_table = vk::get_pipeline_binding_table(pdev);
-
-		if (pgpu->optional_features_support.external_memory_host)
-		{
-			memory_map._vkGetMemoryHostPointerPropertiesEXT = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(dev, "vkGetMemoryHostPointerPropertiesEXT"));
-		}
 
 		if (g_cfg.video.disable_vulkan_mem_allocator)
 		{
@@ -805,7 +880,7 @@ namespace vk
 		}
 		else
 		{
-			m_allocator = std::make_unique<vk::mem_allocator_vma>(*this, pdev);
+			m_allocator = std::make_unique<vk::mem_allocator_vma>(*this, pdev, pdev);
 		}
 
 		// Useful for debugging different VRAM configurations
@@ -1045,7 +1120,7 @@ namespace vk
 		ensure(!host_coherent_types.empty());
 
 		// BAR heap, currently parked for future use, I have some plans for it (kd-11)
-		for (auto& type : bar_memory_types)
+		for (const auto& type : bar_memory_types)
 		{
 			result.device_bar.push(type.type_index, type.size);
 			result.device_bar_total_bytes += type.size;
@@ -1067,7 +1142,7 @@ namespace vk
 			});
 		}
 
-		for (auto& type : device_local_types)
+		for (const auto& type : device_local_types)
 		{
 			result.device_local.push(type.type_index, type.size);
 			result.device_local_total_bytes += type.size;
@@ -1079,7 +1154,7 @@ namespace vk
 			std::sort(host_coherent_types.begin(), host_coherent_types.end(), FN(x.size > y.size));
 		}
 
-		for (auto& type : host_coherent_types)
+		for (const auto& type : host_coherent_types)
 		{
 			result.host_visible_coherent.push(type.type_index, type.size);
 			result.host_visible_total_bytes += type.size;

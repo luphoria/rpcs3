@@ -4,7 +4,6 @@
 #include "Emu/RSX/Common/BufferUtils.h"
 #include "Emu/RSX/Common/buffer_stream.hpp"
 #include "Emu/RSX/Common/io_buffer.h"
-#include "Emu/RSX/Common/simple_array.hpp"
 #include "Emu/RSX/NV47/HW/context_accessors.define.h"
 #include "Emu/RSX/Program/GLSLCommon.h"
 #include "Emu/RSX/rsx_methods.h"
@@ -667,7 +666,23 @@ namespace rsx
 			rop_control.enable_polygon_stipple();
 		}
 
-		if (REGS(m_ctx)->msaa_alpha_to_coverage_enabled() && !RSX(m_ctx)->get_backend_config().supports_hw_a2c)
+		auto can_use_hw_a2c = [&]() -> bool
+		{
+			const auto& config = RSX(m_ctx)->get_backend_config();
+			if (!config.supports_hw_a2c)
+			{
+				return false;
+			}
+
+			if (config.supports_hw_a2c_1spp)
+			{
+				return true;
+			}
+
+			return REGS(m_ctx)->surface_antialias() != rsx::surface_antialiasing::center_1_sample;
+		};
+
+		if (REGS(m_ctx)->msaa_alpha_to_coverage_enabled() && !can_use_hw_a2c())
 		{
 			// TODO: Properly support alpha-to-coverage and alpha-to-one behavior in shaders
 			// Alpha values generate a coverage mask for order independent blending
@@ -735,7 +750,7 @@ namespace rsx
 		utils::stream_vector(dst + 4, 0u, fog_mode, std::bit_cast<u32>(wpos_scale), std::bit_cast<u32>(wpos_bias));
 	}
 
-	void draw_command_processor::fill_constants_instancing_buffer(rsx::io_buffer& indirection_table_buf, rsx::io_buffer& constants_data_array_buffer, const VertexProgramBase& prog) const
+	void draw_command_processor::fill_constants_instancing_buffer(rsx::io_buffer& indirection_table_buf, rsx::io_buffer& constants_data_array_buffer, const VertexProgramBase* prog) const
 	{
 		auto& draw_call = REGS(m_ctx)->current_draw_clause;
 
@@ -743,14 +758,17 @@ namespace rsx
 		ensure(draw_call.is_trivial_instanced_draw);
 
 		// Temp indirection table. Used to track "running" updates.
-		rsx::simple_array<u32> instancing_indirection_table;
+		auto& instancing_indirection_table = m_scratch_buffers.u32buf;
+
 		// indirection table size
-		const auto reloc_table = prog.has_indexed_constants ? decltype(prog.constant_ids){} : prog.constant_ids;
-		const auto redirection_table_size = prog.has_indexed_constants ? 468u : ::size32(prog.constant_ids);
+		const auto full_reupload = !prog || prog->has_indexed_constants;
+		const auto reloc_table = full_reupload ? decltype(prog->constant_ids){} : prog->constant_ids;
+		const auto redirection_table_size = full_reupload ? 468u : ::size32(prog->constant_ids);
 		instancing_indirection_table.resize(redirection_table_size);
 
 		// Temp constants data
-		rsx::simple_array<u128> constants_data;
+		auto& constants_data = m_scratch_buffers.u128buf;
+		constants_data.clear();
 		constants_data.reserve(redirection_table_size * draw_call.pass_count());
 
 		// Allocate indirection buffer on GPU stream
@@ -787,9 +805,9 @@ namespace rsx
 				continue;
 			}
 
-			const int translated_offset = prog.has_indexed_constants
+			const int translated_offset = full_reupload
 				? instance_config.patch_load_offset
-				: prog.TranslateConstantsRange(instance_config.patch_load_offset, instance_config.patch_load_count);
+				: prog->translate_constants_range(instance_config.patch_load_offset, instance_config.patch_load_count);
 
 			if (translated_offset >= 0)
 			{
@@ -809,14 +827,14 @@ namespace rsx
 				continue;
 			}
 
-			ensure(!prog.has_indexed_constants);
+			ensure(!full_reupload);
 
 			// Sparse update. Update records individually instead of bulk
 			// FIXME: Range batching optimization
 			const auto load_end = instance_config.patch_load_offset + instance_config.patch_load_count;
 			for (u32 i = 0; i < redirection_table_size; ++i)
 			{
-				const auto read_index = prog.constant_ids[i];
+				const auto read_index = prog->constant_ids[i];
 				if (read_index < instance_config.patch_load_offset || read_index >= load_end)
 				{
 					// Reading outside "hot" range.

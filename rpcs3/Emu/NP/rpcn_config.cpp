@@ -34,7 +34,7 @@ void cfg_rpcn::load()
 void cfg_rpcn::save() const
 {
 #ifdef _WIN32
-	const std::string path_to_cfg = fs::get_config_dir() + "config/";
+	const std::string path_to_cfg = fs::get_config_dir(true);
 	if (!fs::create_path(path_to_cfg))
 	{
 		rpcn_log.error("Could not create path: %s", path_to_cfg);
@@ -51,11 +51,7 @@ void cfg_rpcn::save() const
 
 std::string cfg_rpcn::get_path()
 {
-#ifdef _WIN32
-	return fs::get_config_dir() + "config/rpcn.yml";
-#else
-	return fs::get_config_dir() + "rpcn.yml";
-#endif
+	return fs::get_config_dir(true) + "rpcn.yml";
 }
 
 std::string cfg_rpcn::generate_npid()
@@ -128,6 +124,11 @@ std::string cfg_rpcn::get_token() const
 	return token.to_string();
 }
 
+bool cfg_rpcn::get_ipv6_support() const
+{
+	return ipv6_support.get();
+}
+
 void cfg_rpcn::set_host(std::string_view host)
 {
 	this->host.from_string(host);
@@ -146,6 +147,11 @@ void cfg_rpcn::set_password(std::string_view password)
 void cfg_rpcn::set_token(std::string_view token)
 {
 	this->token.from_string(token);
+}
+
+void cfg_rpcn::set_ipv6_support(bool ipv6_support)
+{
+	this->ipv6_support.set(ipv6_support);
 }
 
 void cfg_rpcn::set_hosts(const std::vector<std::pair<std::string, std::string>>& vec_hosts)
@@ -204,4 +210,34 @@ bool cfg_rpcn::del_host(std::string_view del_description, std::string_view del_h
 	}
 
 	return false;
+}
+
+std::optional<std::pair<std::string, u16>> parse_rpcn_host(std::string_view host)
+{
+	if (host.empty())
+	{
+		rpcn_log.error("RPCN host is empty!");
+		return std::nullopt;
+	}
+
+	auto splithost = fmt::split(host, {":"});
+	if (splithost.size() != 1 && splithost.size() != 2)
+	{
+		rpcn_log.error("RPCN host is invalid!");
+		return std::nullopt;
+	}
+
+	u16 port = 31313;
+
+	if (splithost.size() == 2)
+	{
+		port = ::narrow<u16>(std::stoul(splithost[1]));
+		if (port == 0)
+		{
+			rpcn_log.error("RPCN port is invalid!");
+			return std::nullopt;
+		}
+	}
+
+	return std::make_pair(std::move(splithost[0]), port);
 }

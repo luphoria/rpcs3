@@ -2,7 +2,8 @@
 #include "overlay_animated_icon.h"
 
 #include "Utilities/File.h"
-#include "../Common/time.hpp"
+
+#include "Emu/Cell/timers.hpp"
 
 namespace rsx
 {
@@ -11,7 +12,7 @@ namespace rsx
 		animated_icon::animated_icon(const char* icon_name)
 		{
 			const std::string image_path = fmt::format("%s/Icons/ui/%s", fs::get_config_dir(), icon_name);
-			m_icon = std::make_unique<image_info>(image_path.c_str());
+			m_icon = std::make_unique<image_info>(image_path);
 			set_raw_image(m_icon.get());
 		}
 
@@ -57,7 +58,7 @@ namespace rsx
 
 		compiled_resource& animated_icon::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resources = image_view::get_compiled();
 			}

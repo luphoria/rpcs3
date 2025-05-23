@@ -19,38 +19,38 @@ The following tools are required to build RPCS3 on Windows 10 or later:
     with standalone **CMake** tool.
 
 - [Python 3.6+](https://www.python.org/downloads/) (add to PATH)
-- [Qt 6.8.1](https://www.qt.io/download-qt-installer) In case you can't download from the official installer, you can use [Another Qt installer](https://github.com/miurahr/aqtinstall) (In that case you will need to manually add the "qtmultimedia" module when installing Qt)
+- [Qt 6.9.0](https://www.qt.io/download-qt-installer) In case you can't download from the official installer, you can use [Another Qt installer](https://github.com/miurahr/aqtinstall) (In that case you will need to manually add the "qtmultimedia" module when installing Qt)
 - [Vulkan SDK 1.3.268.0](https://vulkan.lunarg.com/sdk/home) (see "Install the SDK" [here](https://vulkan.lunarg.com/doc/sdk/latest/windows/getting_started.html)) for now future SDKs don't work. You need precisely 1.3.268.0.
 
 The `sln` solution available only on **Visual Studio** is the preferred building solution. It easily allows to build the **RPCS3** application in `Release` and `Debug` mode.
 
 In order to build **RPCS3** with the `sln` solution (with **Visual Studio**), **Qt** libs need to be detected. To detect the libs:
-- add and set the `QTDIR` environment variable, e.g. `<QtInstallFolder>\6.8.1\msvc2022_64\`
+- add and set the `QTDIR` environment variable, e.g. `<QtInstallFolder>\6.9.0\msvc2022_64\`
 - or use the [Visual Studio Qt Plugin](https://marketplace.visualstudio.com/items?itemName=TheQtCompany.QtVisualStudioTools2022)
 
   **NOTE:** If you have issues with the **Visual Studio Qt Plugin**, you may want to uninstall it and install the [Legacy Qt Plugin](https://marketplace.visualstudio.com/items?itemName=TheQtCompany.LEGACYQtVisualStudioTools2022) instead.
 
 In order to build **RPCS3** with the `CMake` solution (with both **Visual Studio** and standalone **CMake** tool):
-- add and set the `CMAKE_PREFIX_PATH` environment variable to the **Qt** libs path, e.g. `<QtInstallFolder>\6.8.1\msvc2022_64\`
+- add and set the `Qt6_ROOT` environment variable to the **Qt** libs path, e.g. `<QtInstallFolder>\6.9.0\msvc2022_64\`
 
 ### Linux
 
 These are the essentials tools to build RPCS3 on Linux. Some of them can be installed through your favorite package manager:
 - Clang 17+ or GCC 13+
 - [CMake 3.28.0+](https://www.cmake.org/download/)
-- [Qt 6.8.1](https://www.qt.io/download-qt-installer)
+- [Qt 6.9.0](https://www.qt.io/download-qt-installer)
 - [Vulkan SDK 1.3.268.0](https://vulkan.lunarg.com/sdk/home) (See "Install the SDK" [here](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)) for now future SDKs don't work. You need precisely 1.3.268.0.
-- [SDL2](https://github.com/libsdl-org/SDL/releases) (for the FAudio backend)
+- [SDL3](https://github.com/libsdl-org/SDL/releases) (for the FAudio backend)
 
 **If you have an NVIDIA GPU, you may need to install the libglvnd package.**
 
 #### Arch Linux
 
-    sudo pacman -S glew openal cmake vulkan-validation-layers qt6-base qt6-declarative qt6-multimedia qt6-svg sdl2 sndio jack2 base-devel
+    sudo pacman -S glew openal cmake ninja vulkan-validation-layers qt6-base qt6-declarative qt6-multimedia qt6-svg sdl3 sndio jack2 base-devel
 
 #### Debian & Ubuntu
 
-    sudo apt-get install build-essential libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl2-2.0 libsdl2-dev libjack-dev libsndio-dev
+    sudo apt-get install build-essential ninja-build libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl3-3.2 libsdl3-dev libjack-dev libsndio-dev
 
 Ubuntu is usually horrendously out of date, and some packages need to be downloaded by hand. This part is for Qt, GCC, Vulkan, and CMake
 
@@ -67,7 +67,7 @@ sudo apt-get update
 sudo apt-get install gcc-13 g++-13
 ```
 
-You can either use `update-alternatives` to setup `gcc-13`/`g++-13` as your default compilers or prefix any `cmake` command by `CXX=g++-13 CC=gcc-13 ` to use it.
+You can either use `update-alternatives` to setup `gcc-13`/`g++-13` as your default compilers or prefix the `cmake` build file generation command by `CXX=g++-13 CC=gcc-13` to use it.
 
 ##### Vulkan SDK
 
@@ -94,19 +94,21 @@ sudo apt-get install cmake
 
 #### Fedora
 
-    sudo dnf install alsa-lib-devel cmake glew glew-devel libatomic libevdev-devel libudev-devel openal-devel qt6-qtbase-devel qt6-qtbase-private-devel vulkan-devel pipewire-jack-audio-connection-kit-devel qt6-qtmultimedia-devel qt6-qtsvg-devel
+    sudo dnf install alsa-lib-devel cmake ninja-build glew glew-devel libatomic libevdev-devel libudev-devel openal-devel qt6-qtbase-devel qt6-qtbase-private-devel vulkan-devel pipewire-jack-audio-connection-kit-devel qt6-qtmultimedia-devel qt6-qtsvg-devel llvm-devel
 
 #### OpenSUSE
 
-    sudo zypper install git cmake libasound2 libpulse-devel openal-soft-devel glew-devel zlib-devel libedit-devel vulkan-devel libudev-devel libqt6-qtbase-devel libqt6-qtmultimedia-devel libqt6-qtsvg-devel libQt6Gui-private-headers-devel libevdev-devel libsndio7_1 libjack-devel
+    sudo zypper install git cmake ninja libasound2 libpulse-devel openal-soft-devel glew-devel zlib-devel libedit-devel vulkan-devel libudev-devel libqt6-qtbase-devel libqt6-qtmultimedia-devel libqt6-qtsvg-devel libQt6Gui-private-headers-devel libevdev-devel libsndio7_1 libjack-devel
 
 ## Setup the project
 
 Clone and initialize the repository
 
-```
-git clone https://github.com/RPCS3/rpcs3.git
+```bash
+git clone --recurse-submodules https://github.com/RPCS3/rpcs3.git
 cd rpcs3
+# This is automatically done by `git clone --recurse-submodules`,
+# but in case you forgot it, you can manually fetch submodules this way:
 git submodule update --init
 ```
 
@@ -119,7 +121,7 @@ Start **Visual Studio**, click on `Open a project or solution` and select the `r
 ##### Configuring the Qt Plugin (if used)
 
 1) go to `Extensions->Qt VS Tools->Qt Versions`
-2) add the path to your Qt installation with compiler e.g. `<QtInstallFolder>\6.8.1\msvc2022_64`, version will fill in automatically
+2) add the path to your Qt installation with compiler e.g. `<QtInstallFolder>\6.9.0\msvc2022_64`, version will fill in automatically
 3) go to `Extensions->Qt VS Tools->Options->Legacy Project Format`. (Only available in the **Legacy Qt Plugin**)
 4) set `Build: Run pre-build setup` to `true`. (Only available in the **Legacy Qt Plugin**)
 
@@ -127,19 +129,17 @@ Start **Visual Studio**, click on `Open a project or solution` and select the `r
 
 **NOTE:** The recommended build configuration is `Release`. (On older revisions: `Release - LLVM`)
 
-To speed up the compilation time, you may want to download and extract to `<rpcs3_root>\build\lib_ext\<$(Configuration)>-x64` (e.g. `c:\rpcs3\build\lib_ext\Release-x64`; the path needs to be created) some of the following precompiled libs:
-- [LLVM libs](https://github.com/RPCS3/llvm-mirror/releases/download/custom-build-win-16.0.1/llvmlibs_mt.7z)
-- [additional libs](https://github.com/RPCS3/glslang/releases/latest/download/glslanglibs_mt.7z)
+To speed up the compilation time, you may want to download and extract to `<rpcs3_root>\build\lib_ext\<$(Configuration)>-x64` (e.g. `c:\rpcs3\build\lib_ext\Release-x64`; the path needs to be created) the following precompiled lib:
+- [LLVM libs](https://github.com/RPCS3/llvm-mirror/releases/download/custom-build-win-19.1.7/llvmlibs_mt.7z)
 
 **NOTES:**
 - `<$(Configuration)>` can assume values `Release` or `Debug`.
-- Unoptimised/debug libs are currently not available precompiled for both **LLVM** and **glslang**. Trying to use them when building the **RPCS3** application in `Debug` mode will provide a `cannot open file` error.
+- Unoptimised/debug libs are currently not available precompiled for **LLVM**. Trying to use it when building the **RPCS3** application in `Debug` mode will provide a `cannot open file` error.
 
 If you're not using the precompiled libs, those dependency libs need to be compiled first. From the `Solution Explorer` panel:
 1) expand `__BUILD_BEFORE`
 2) from the `Solution Configurations` drop-down menu, select `Release` (select `Debug` if you want to build in `Debug` mode)
-3) one after another, right-click on the following projects and then click on `Build` to build the selected lib:
-   - `glslang`
+3) right-click one of the following projects and then click on `Build` to build the selected lib:
    - `llvm_build`
    - or `llvm_build_clang_cl` (if you have also the **clang** compiler installed on VS)
 
@@ -181,11 +181,11 @@ In case you preferred to install and use the standalone **CMake** tool:
 
 While still in the project root:
 
-1) `cd .. && mkdir --parents rpcs3_build && cd rpcs3_build`
-2) `cmake ../rpcs3/ && make` or `CXX=g++-13 CC=gcc-13 cmake ../rpcs3/ && make` to force these compilers
-3) run RPCS3 with `./bin/rpcs3`
+1) `cmake -B build -G Ninja` to generate build files with the default compiler (override the compiler by prepending e.g. `CC=clang CXX=clang++`)
+2) `cmake --build build` to compile
+3) run RPCS3 with `build/bin/rpcs3`
 
-If compiling for ARM, pass the flag `-DUSE_NATIVE_INSTRUCTIONS=OFF` to the cmake command. This resolves some Neon errors when compiling our SIMD headers.
+If compiling for ARM, pass the flag `-DUSE_NATIVE_INSTRUCTIONS=OFF` to the first `cmake` command. This resolves some NEON errors when compiling our SIMD headers.
 
 When using GDB, configure it to ignore SIGSEGV signal (`handle SIGSEGV nostop noprint`).
 If desired, use the various build options in [CMakeLists](https://github.com/RPCS3/rpcs3/blob/master/CMakeLists.txt).

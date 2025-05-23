@@ -49,7 +49,7 @@ private:
 	static std::array<u8, 16> generate_figure_key(const std::array<u8, 0x2D * 0x04>& buf);
 	static u32 scramble(const std::array<u8, 7>& uid, u8 count);
 	static std::array<u8, 4> pwd_generate(const std::array<u8, 7>& uid);
-	static std::array<u8, 4> dimensions_randomize(const std::vector<u8> key, u8 count);
+	static std::array<u8, 4> dimensions_randomize(const std::vector<u8>& key, u8 count);
 	static u32 get_figure_id(const std::array<u8, 0x2D * 0x04>& buf);
 	u32 get_next();
 	dimensions_figure& get_figure_by_index(u8 index);
@@ -70,6 +70,9 @@ class usb_device_dimensions : public usb_device_emulated
 public:
 	usb_device_dimensions(const std::array<u8, 7>& location);
 	~usb_device_dimensions();
+
+	static std::shared_ptr<usb_device> make_instance(u32 controller_index, const std::array<u8, 7>& location);
+	static u16 get_num_emu_devices();
 
 	void control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 buf_size, u8* buf, UsbTransfer* transfer) override;
 	void interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer) override;

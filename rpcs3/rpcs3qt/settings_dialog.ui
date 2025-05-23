@@ -164,6 +164,24 @@
              </widget>
             </item>
             <item>
+             <widget class="QGroupBox" name="gb_spuBlockSize">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="title">
+               <string>SPU Block Size</string>
+              </property>
+              <layout class="QVBoxLayout" name="gb_spuBlockSize_layout">
+               <item>
+                <widget class="QComboBox" name="spuBlockSize"/>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
              <widget class="QGroupBox" name="checkboxes">
               <property name="title">
                <string>Additional Settings</string>
@@ -247,7 +265,7 @@
            </layout>
           </item>
           <item>
-           <layout class="QVBoxLayout" name="coreTabRightLayout" stretch="0,0,0,0,0">
+           <layout class="QVBoxLayout" name="coreTabRightLayout" stretch="0,0,0,0">
             <item>
              <widget class="QGroupBox" name="gb_tsx">
               <property name="sizePolicy">
@@ -262,24 +280,6 @@
               <layout class="QVBoxLayout" name="gb_tsx_layout">
                <item>
                 <widget class="QComboBox" name="enableTSX"/>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="gb_spuBlockSize">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
-                <horstretch>0</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="title">
-               <string>SPU Block Size</string>
-              </property>
-              <layout class="QVBoxLayout" name="gb_spuBlockSize_layout">
-               <item>
-                <widget class="QComboBox" name="spuBlockSize"/>
                </item>
               </layout>
              </widget>
@@ -908,18 +908,6 @@
                   <string notr="true">Shader Interpreter only</string>
                  </property>
                 </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="gb_shader_compiler_threads">
-              <property name="title">
-               <string>Number of Shader Compiler Threads</string>
-              </property>
-              <layout class="QVBoxLayout" name="gb_shader_compiler_threads_layout">
-               <item>
-                <widget class="QComboBox" name="shaderCompilerThreads"/>
                </item>
               </layout>
              </widget>
@@ -2435,16 +2423,23 @@
                 </widget>
                </item>
                <item>
-                <widget class="QCheckBox" name="ppuNJFixup">
+                <widget class="QCheckBox" name="disableSpinOptimization">
                  <property name="text">
-                  <string>PPU Non-Java Mode Fixup</string>
+                  <string>Disable SPU GETLLAR Spin Optimization</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QCheckBox" name="fixupPPUVNAN">
+                <widget class="QCheckBox" name="enableSpuEventsBusyLoop">
                  <property name="text">
-                  <string>PPU Vector NaN Fixup</string>
+                  <string>Enable SPU Events Busy Loop</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="ppuNJFixup">
+                 <property name="text">
+                  <string>PPU Non-Java Mode Fixup</string>
                  </property>
                 </widget>
                </item>
@@ -2473,13 +2468,6 @@
                 <widget class="QCheckBox" name="compatibleSavestates">
                  <property name="text">
                   <string>SPU-Compatible Savestates Mode</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QCheckBox" name="spuProfiler">
-                 <property name="text">
-                  <string>SPU Profiler</string>
                  </property>
                 </widget>
                </item>
@@ -2692,13 +2680,6 @@
                 </widget>
                </item>
                <item>
-                <widget class="QCheckBox" name="disableOnDiskShaderCache">
-                 <property name="text">
-                  <string>Disable On-Disk Shader Cache</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
                 <widget class="QCheckBox" name="disableVertexCache">
                  <property name="text">
                   <string>Disable Vertex Cache</string>
@@ -2725,31 +2706,6 @@
                   <string>Disable MSL Fast Math</string>
                  </property>
                 </widget>
-               </item>
-               <item>
-                <widget class="QCheckBox" name="disableAsyncHostMM">
-                 <property name="text">
-                  <string>Disable Asynchronous Memory Manager</string>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="gb_vulkansched">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
-                <horstretch>0</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="title">
-               <string>Vulkan Queue Scheduler</string>
-              </property>
-              <layout class="QVBoxLayout" name="gb_vksched_layout">
-               <item>
-                <widget class="QComboBox" name="vulkansched"/>
                </item>
               </layout>
              </widget>
@@ -3011,6 +2967,13 @@
                 </widget>
                </item>
                <item>
+                <widget class="QCheckBox" name="showShaderCompilationHint">
+                 <property name="text">
+                  <string>Show shader compilation hint</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
                 <widget class="QCheckBox" name="showPPUCompilationHint">
                  <property name="text">
                   <string>Show PPU compilation hint</string>
@@ -3018,9 +2981,9 @@
                 </widget>
                </item>
                <item>
-                <widget class="QCheckBox" name="showShaderCompilationHint">
+                <widget class="QCheckBox" name="showAutosaveAutoloadHint">
                  <property name="text">
-                  <string>Show shader compilation hint</string>
+                  <string>Show autosave/autoload hint</string>
                  </property>
                 </widget>
                </item>
@@ -3042,13 +3005,6 @@
                 <widget class="QCheckBox" name="showMouseAndKeyboardToggleHint">
                  <property name="text">
                   <string>Show mouse and keyboard toggle hint</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QCheckBox" name="showAutosaveAutoloadHint">
-                 <property name="text">
-                  <string>Show autosave/autoload hint</string>
                  </property>
                 </widget>
                </item>
@@ -3093,6 +3049,18 @@
               <layout class="QVBoxLayout" name="gb_max_llvm_layout">
                <item>
                 <widget class="QComboBox" name="maxLLVMThreads"/>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="gb_shader_compiler_threads">
+              <property name="title">
+               <string>Max Shader Compile Threads</string>
+              </property>
+              <layout class="QVBoxLayout" name="gb_shader_compiler_threads_layout">
+               <item>
+                <widget class="QComboBox" name="shaderCompilerThreads"/>
                </item>
               </layout>
              </widget>
@@ -4287,6 +4255,20 @@
               </widget>
              </item>
              <item>
+              <widget class="QCheckBox" name="disableAsyncHostMM">
+               <property name="text">
+                <string>Disable Asynchronous Memory Manager</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="disableOnDiskShaderCache">
+               <property name="text">
+                <string>Disable On-Disk Shader Cache</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <spacer name="verticalSpacerDebugGPU">
                <property name="orientation">
                 <enum>Qt::Orientation::Vertical</enum>
@@ -4396,6 +4378,20 @@
               </widget>
              </item>
              <item>
+              <widget class="QCheckBox" name="fixupPPUVNAN">
+               <property name="text">
+                <string>PPU Vector NaN Fixup</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="spuProfiler">
+               <property name="text">
+                <string>SPU Profiler</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <spacer name="verticalSpacerDebugCore">
                <property name="orientation">
                 <enum>Qt::Orientation::Vertical</enum>
@@ -4416,7 +4412,7 @@
           </item>
           <item>
            <widget class="QWidget" name="debug_more_stuff" native="true">
-            <layout class="QVBoxLayout" name="debug_more_stuff_layout" stretch="0,0,0,0,1">
+            <layout class="QVBoxLayout" name="debug_more_stuff_layout" stretch="0,0,0,0,0,1">
              <property name="leftMargin">
               <number>0</number>
              </property>
@@ -4472,6 +4468,24 @@
                    </widget>
                   </item>
                  </layout>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gb_vulkansched">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="title">
+                <string>Vulkan Queue Scheduler</string>
+               </property>
+               <layout class="QVBoxLayout" name="gb_vksched_layout">
+                <item>
+                 <widget class="QComboBox" name="vulkansched"/>
                 </item>
                </layout>
               </widget>

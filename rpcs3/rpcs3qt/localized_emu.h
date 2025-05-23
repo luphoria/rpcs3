@@ -165,8 +165,8 @@ private:
 		case localized_string_id::CELL_SAVEDATA_DELETE: return tr("Delete this data?\n\n%0", "Savedata entry info").arg(std::forward<Args>(args)...);
 		case localized_string_id::CELL_SAVEDATA_LOAD: return tr("Load this data?\n\n%0", "Savedata entry info").arg(std::forward<Args>(args)...);
 		case localized_string_id::CELL_SAVEDATA_OVERWRITE: return tr("Do you want to overwrite the saved data?\n\n%0", "Savedata entry info").arg(std::forward<Args>(args)...);
-		case localized_string_id::CELL_SAVEDATA_AUTOSAVE: return tr("Saving");
-		case localized_string_id::CELL_SAVEDATA_AUTOLOAD: return tr("Loading");
+		case localized_string_id::CELL_SAVEDATA_AUTOSAVE: return tr("Saving...");
+		case localized_string_id::CELL_SAVEDATA_AUTOLOAD: return tr("Loading...");
 		case localized_string_id::CELL_CROSS_CONTROLLER_MSG: return tr("Start [%0] on the PS Vita system.\nIf you have not installed [%0], go to [Remote Play] on the PS Vita system and start [Cross-Controller] from the LiveArea™ screen.", "Cross-Controller message").arg(std::forward<Args>(args)...);
 		case localized_string_id::CELL_CROSS_CONTROLLER_FW_MSG: return tr("If your system software version on the PS Vita system is earlier than 1.80, you must update the system software to the latest version.", "Cross-Controller firmware message");
 		case localized_string_id::CELL_NP_RECVMESSAGE_DIALOG_TITLE: return tr("Select Message", "RECVMESSAGE_DIALOG");
@@ -185,6 +185,7 @@ private:
 		case localized_string_id::RPCN_ERROR_INVALID_INPUT: return tr("RPCN: Invalid Input (Wrong Host/Port)");
 		case localized_string_id::RPCN_ERROR_WOLFSSL: return tr("RPCN Connection Error: WolfSSL Error");
 		case localized_string_id::RPCN_ERROR_RESOLVE: return tr("RPCN Connection Error: Resolve Error");
+		case localized_string_id::RPCN_ERROR_BINDING: return tr("RPCN Connection Error: Failed to bind to given binding IP");
 		case localized_string_id::RPCN_ERROR_CONNECT: return tr("RPCN Connection Error");
 		case localized_string_id::RPCN_ERROR_LOGIN_ERROR: return tr("RPCN Login Error: Identification Error");
 		case localized_string_id::RPCN_ERROR_ALREADY_LOGGED: return tr("RPCN Login Error: User Already Logged In");
@@ -297,6 +298,8 @@ private:
 		case localized_string_id::HOME_MENU_TROPHY_LOCKED_TITLE: return tr("Locked trophy: %0").arg(std::forward<Args>(args)...);
 		case localized_string_id::HOME_MENU_TROPHY_HIDDEN_TITLE: return tr("Hidden trophy");
 		case localized_string_id::HOME_MENU_TROPHY_HIDDEN_DESCRIPTION: return tr("This trophy is hidden");
+		case localized_string_id::HOME_MENU_TROPHY_SHOW_HIDDEN_TROPHIES: return tr("Show hidden trophies");
+		case localized_string_id::HOME_MENU_TROPHY_HIDE_HIDDEN_TROPHIES: return tr("Hide hidden trophies");
 		case localized_string_id::HOME_MENU_TROPHY_PLATINUM_RELEVANT: return tr("Platinum relevant");
 		case localized_string_id::HOME_MENU_TROPHY_GRADE_BRONZE: return tr("Bronze", "Trophy type");
 		case localized_string_id::HOME_MENU_TROPHY_GRADE_SILVER: return tr("Silver", "Trophy type");
@@ -314,6 +317,7 @@ private:
 		case localized_string_id::PROGRESS_DIALOG_OF: return tr("of");
 		case localized_string_id::PROGRESS_DIALOG_PLEASE_WAIT: return tr("Please wait");
 		case localized_string_id::PROGRESS_DIALOG_STOPPING_PLEASE_WAIT: return tr("Stopping. Please wait...");
+		case localized_string_id::PROGRESS_DIALOG_SAVESTATE_PLEASE_WAIT: return tr("Creating savestate. Please wait...");
 		case localized_string_id::PROGRESS_DIALOG_SCANNING_PPU_EXECUTABLE: return tr("Scanning PPU Executable...");
 		case localized_string_id::PROGRESS_DIALOG_ANALYZING_PPU_EXECUTABLE: return tr("Analyzing PPU Executable...");
 		case localized_string_id::PROGRESS_DIALOG_SCANNING_PPU_MODULES: return tr("Scanning PPU Modules...");

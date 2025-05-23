@@ -5,6 +5,7 @@
 #include "util/logs.hpp"
 #include "Utilities/geometry.h"
 #include "Utilities/File.h"
+#include "Emu/Cell/timers.hpp"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -53,7 +54,7 @@ namespace rsx
 			return result;
 		}
 
-		image_info::image_info(const char* filename, bool grayscaled)
+		image_info::image_info(const std::string& filename, bool grayscaled)
 		{
 			fs::file f(filename, fs::read + fs::isfile);
 
@@ -131,7 +132,7 @@ namespace rsx
 			{
 				// First check the global config dir
 				const std::string image_path = fs::get_config_dir() + "Icons/ui/" + res;
-				auto info = std::make_unique<image_info>(image_path.c_str());
+				auto info = std::make_unique<image_info>(image_path);
 
 #if !defined(_WIN32) && !defined(__APPLE__) && defined(DATADIR)
 				// Check the DATADIR if defined
@@ -139,7 +140,7 @@ namespace rsx
 				{
 					const std::string data_dir (DATADIR);
 					const std::string image_data = data_dir + "/Icons/ui/" + res;
-					info = std::make_unique<image_info>(image_data.c_str());
+					info = std::make_unique<image_info>(image_data);
 				}
 #endif
 
@@ -147,7 +148,7 @@ namespace rsx
 				{
 					// Resource was not found in the DATADIR or config dir, try and grab from relative path (linux)
 					std::string src = "Icons/ui/" + res;
-					info = std::make_unique<image_info>(src.c_str());
+					info = std::make_unique<image_info>(src);
 #ifndef _WIN32
 					// Check for Icons in ../share/rpcs3 for AppImages,
 					// in rpcs3.app/Contents/Resources for App Bundles, and /usr/bin.
@@ -187,12 +188,12 @@ namespace rsx
 #else
 							src = executablePath + "/../share/rpcs3/Icons/ui/" + res;
 #endif
-							info = std::make_unique<image_info>(src.c_str());
+							info = std::make_unique<image_info>(src);
 							// Check if the icons are in the same directory as the executable (local builds)
 							if (info->get_data() == nullptr)
 							{
 								src = executablePath + "/Icons/ui/" + res;
-								info = std::make_unique<image_info>(src.c_str());
+								info = std::make_unique<image_info>(src);
 							}
 						}
 					}
@@ -301,7 +302,7 @@ namespace rsx
 		void overlay_element::refresh()
 		{
 			// Just invalidate for draw when get_compiled() is called
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::translate(s16 _x, s16 _y)
@@ -309,7 +310,7 @@ namespace rsx
 			x += _x;
 			y += _y;
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::scale(f32 _x, f32 _y, bool origin_scaling)
@@ -323,7 +324,7 @@ namespace rsx
 			w = static_cast<u16>(_x * w);
 			h = static_cast<u16>(_y * h);
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_pos(s16 _x, s16 _y)
@@ -331,7 +332,7 @@ namespace rsx
 			x = _x;
 			y = _y;
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_size(u16 _w, u16 _h)
@@ -339,7 +340,7 @@ namespace rsx
 			w = _w;
 			h = _h;
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_padding(u16 left, u16 right, u16 top, u16 bottom)
@@ -349,13 +350,13 @@ namespace rsx
 			padding_top = top;
 			padding_bottom = bottom;
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_padding(u16 padding)
 		{
 			padding_left = padding_right = padding_top = padding_bottom = padding;
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		// NOTE: Functions as a simple position offset. Top left corner is the anchor.
@@ -364,25 +365,36 @@ namespace rsx
 			margin_left = left;
 			margin_top = top;
 
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_margin(u16 margin)
 		{
 			margin_left = margin_top = margin;
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_text(const std::string& text)
 		{
-			this->text = utf8_to_u32string(text);
-			is_compiled = false;
+			std::u32string new_text = utf8_to_u32string(text);
+			const bool is_dirty = this->text != new_text;
+			this->text = std::move(new_text);
+
+			if (is_dirty)
+			{
+				m_is_compiled = false;
+			}
 		}
 
 		void overlay_element::set_unicode_text(const std::u32string& text)
 		{
+			const bool is_dirty = this->text != text;
 			this->text = text;
-			is_compiled = false;
+
+			if (is_dirty)
+			{
+				m_is_compiled = false;
+			}
 		}
 
 		void overlay_element::set_text(localized_string_id id)
@@ -393,19 +405,19 @@ namespace rsx
 		void overlay_element::set_font(const char* font_name, u16 font_size)
 		{
 			font_ref = fontmgr::get(font_name, font_size);
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::align_text(text_align align)
 		{
 			alignment = align;
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		void overlay_element::set_wrap_text(bool state)
 		{
 			wrap_text = state;
-			is_compiled = false;
+			m_is_compiled = false;
 		}
 
 		font* overlay_element::get_font() const
@@ -562,7 +574,7 @@ namespace rsx
 
 		compiled_resource& overlay_element::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resources.clear();
 
@@ -595,10 +607,10 @@ namespace rsx
 					cmd_text.verts = render_text(text.c_str(), static_cast<f32>(x), static_cast<f32>(y));
 
 					if (!cmd_text.verts.empty())
-						compiled_resources.add(std::move(compiled_resources_temp), margin_left, margin_top);
+						compiled_resources.add(std::move(compiled_resources_temp), margin_left - horizontal_scroll_offset, margin_top - vertical_scroll_offset);
 				}
 
-				is_compiled = true;
+				m_is_compiled = true;
 			}
 
 			return compiled_resources;
@@ -663,7 +675,7 @@ namespace rsx
 		{
 			overlay_element::translate(_x, _y);
 
-			for (auto &itm : m_items)
+			for (auto& itm : m_items)
 				itm->translate(_x, _y);
 		}
 
@@ -674,13 +686,23 @@ namespace rsx
 			translate(dx, dy);
 		}
 
+		bool layout_container::is_compiled()
+		{
+			if (m_is_compiled && std::any_of(m_items.cbegin(), m_items.cend(), [](const auto& item){ return item && !item->is_compiled(); }))
+			{
+				m_is_compiled = false;
+			}
+
+			return m_is_compiled;
+		}
+
 		compiled_resource& layout_container::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resource result = overlay_element::get_compiled();
 
-				for (auto &itm : m_items)
+				for (auto& itm : m_items)
 					result.add(itm->get_compiled());
 
 				compiled_resources = result;
@@ -715,7 +737,7 @@ namespace rsx
 				return m_items.back().get();
 			}
 
-			auto result = item.get();
+			overlay_element* result = item.get();
 			m_items.insert(m_items.begin() + offset, std::move(item));
 			return result;
 		}
@@ -725,23 +747,29 @@ namespace rsx
 			if (scroll_offset_value == 0 && auto_resize)
 				return layout_container::get_compiled();
 
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resource result = overlay_element::get_compiled();
 				const f32 global_y_offset = static_cast<f32>(-scroll_offset_value);
 
-				for (auto &item : m_items)
+				for (auto& item : m_items)
 				{
 					if (!item)
 					{
-						rsx_log.error("Found null item in overlay_controls");
+						rsx_log.error("Found null item in overlay_controls::vertical_layout");
 						continue;
 					}
 
 					const s32 item_y_limit = s32{item->y} + item->h - scroll_offset_value - y;
 					const s32 item_y_base = s32{item->y} - scroll_offset_value - y;
 
-					if (item_y_limit < 0 || item_y_base > h)
+					if (item_y_base > h)
+					{
+						// Out of bounds. The following items will be too.
+						break;
+					}
+
+					if (item_y_limit < 0)
 					{
 						// Out of bounds
 						continue;
@@ -801,22 +829,35 @@ namespace rsx
 			if (scroll_offset_value == 0 && auto_resize)
 				return layout_container::get_compiled();
 
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resource result = overlay_element::get_compiled();
 				const f32 global_x_offset = static_cast<f32>(-scroll_offset_value);
 
 				for (auto &item : m_items)
 				{
+					if (!item)
+					{
+						rsx_log.error("Found null item in overlay_controls::horizontal_layout");
+						continue;
+					}
+
 					const s32 item_x_limit = s32{item->x} + item->w - scroll_offset_value - w;
 					const s32 item_x_base = s32{item->x} - scroll_offset_value - w;
 
-					if (item_x_limit < 0 || item_x_base > h)
+					if (item_x_base > w)
+					{
+						// Out of bounds. The following items will be too.
+						break;
+					}
+
+					if (item_x_limit < 0)
 					{
 						// Out of bounds
 						continue;
 					}
-					else if (item_x_limit > h || item_x_base < 0)
+
+					if (item_x_limit > w || item_x_base < 0)
 					{
 						// Partial render
 						areaf clip_rect = static_cast<areaf>(areai{x, y, (x + w), (y + h)});
@@ -842,7 +883,7 @@ namespace rsx
 
 		compiled_resource& image_view::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				auto& result  = overlay_element::get_compiled();
 				auto& cmd_img = result.draw_commands.front();
@@ -860,7 +901,7 @@ namespace rsx
 				verts[2] += vertex(padding_left, -padding_top, 0, 0);
 				verts[3] += vertex(-padding_right, -padding_top, 0, 0);
 
-				is_compiled = true;
+				m_is_compiled = true;
 			}
 
 			return compiled_resources;
@@ -872,7 +913,7 @@ namespace rsx
 			external_ref = nullptr;
 		}
 
-		void image_view::set_raw_image(image_info* raw_image)
+		void image_view::set_raw_image(image_info_base* raw_image)
 		{
 			image_resource_ref = image_resource_id::raw_image;
 			external_ref = raw_image;
@@ -915,7 +956,7 @@ namespace rsx
 
 		compiled_resource& image_button::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				auto& compiled = image_view::get_compiled();
 				for (auto& cmd : compiled.draw_commands)
@@ -967,7 +1008,7 @@ namespace rsx
 
 		compiled_resource& rounded_rect::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				compiled_resources.clear();
 
@@ -1048,7 +1089,7 @@ namespace rsx
 					compiled_resources.add(std::move(compiled_resources_temp), margin_left, margin_top);
 				}
 
-				is_compiled = true;
+				m_is_compiled = true;
 			}
 
 			return compiled_resources;

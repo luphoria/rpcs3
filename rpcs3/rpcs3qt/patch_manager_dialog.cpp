@@ -14,7 +14,6 @@
 
 #include "ui_patch_manager_dialog.h"
 #include "patch_manager_dialog.h"
-#include "table_item_delegate.h"
 #include "gui_settings.h"
 #include "downloader.h"
 #include "qt_utils.h"
@@ -58,12 +57,11 @@ enum node_level : int
 
 Q_DECLARE_METATYPE(patch_engine::patch_config_value);
 
-patch_manager_dialog::patch_manager_dialog(std::shared_ptr<gui_settings> gui_settings, std::unordered_map<std::string, std::set<std::string>> games, const std::string& title_id, const std::string& version, QWidget* parent)
+patch_manager_dialog::patch_manager_dialog(std::shared_ptr<gui_settings> gui_settings, const std::vector<game_info>& games, const std::string& title_id, const std::string& version, QWidget* parent)
 	: QDialog(parent)
 	, m_gui_settings(std::move(gui_settings))
 	, m_expand_current_match(!title_id.empty() && !version.empty()) // Expand first search results
 	, m_search_version(QString::fromStdString(version))
-	, m_owned_games(std::move(games))
 	, ui(new Ui::patch_manager_dialog)
 {
 	ui->setupUi(this);
@@ -71,6 +69,15 @@ patch_manager_dialog::patch_manager_dialog(std::shared_ptr<gui_settings> gui_set
 
 	// Load gui settings
 	m_show_owned_games_only = m_gui_settings->GetValue(gui::pm_show_owned).toBool();
+
+	// Get owned games
+	for (const auto& game : games)
+	{
+		if (game && game->info.bootable)
+		{
+			m_owned_games[game->info.serial].insert(game->GetGameVersion());
+		}
+	}
 
 	// Initialize gui controls
 	ui->patch_filter->setText(QString::fromStdString(title_id));
@@ -1075,7 +1082,7 @@ void patch_manager_dialog::dropEvent(QDropEvent* event)
 				QString message = tr("Errors were found in the patch file.");
 				QMessageBox* mb = new QMessageBox(QMessageBox::Icon::Critical, tr("Validation failed"), message, QMessageBox::Ok, this);
 				mb->setInformativeText(tr("To see the error log, please click \"Show Details\"."));
-				mb->setDetailedText(tr("%0").arg(summary));
+				mb->setDetailedText(summary);
 				mb->setAttribute(Qt::WA_DeleteOnClose);
 
 				// Smartass hack to make the unresizeable message box wide enough for the changelog
@@ -1247,7 +1254,16 @@ bool patch_manager_dialog::handle_json(const QByteArray& data)
 	if (patch_engine::load(patches, "From Download", content, true, &log_message))
 	{
 		patch_log.notice("Successfully validated downloaded patch file");
-		const std::string path = patch_engine::get_patches_path() + "patch.yml";
+
+		const std::string patches_path = patch_engine::get_patches_path();
+
+		if (!fs::create_path(patches_path))
+		{
+			patch_log.fatal("Failed to create path: %s (%s)", patches_path, fs::g_tls_error);
+			return false;
+		}
+
+		const std::string path = patches_path + "patch.yml";
 
 		// Back up current patch file if possible
 		if (fs::is_file(path))
@@ -1263,7 +1279,7 @@ bool patch_manager_dialog::handle_json(const QByteArray& data)
 		// Overwrite current patch file
 		fs::pending_file patch_file(path);
 
-		if (!patch_file.file || (patch_file.file.write(content), !patch_file.commit()))
+		if (!patch_file.file || !patch_file.file.write(content) || !patch_file.commit())
 		{
 			patch_log.error("Could not save new patches to %s (error=%s)", path, fs::g_tls_error);
 			return false;
@@ -1288,7 +1304,7 @@ bool patch_manager_dialog::handle_json(const QByteArray& data)
 			QString message = tr("Errors were found in the downloaded patch file.");
 			QMessageBox* mb = new QMessageBox(QMessageBox::Icon::Critical, tr("Validation failed"), message, QMessageBox::Ok, this);
 			mb->setInformativeText(tr("To see the error log, please click \"Show Details\"."));
-			mb->setDetailedText(tr("%0").arg(summary));
+			mb->setDetailedText(summary);
 			mb->setAttribute(Qt::WA_DeleteOnClose);
 
 			// Smartass hack to make the unresizeable message box wide enough for the changelog

@@ -2,11 +2,6 @@
 #include "Dimensions.h"
 
 #include <bit>
-#include <thread>
-
-#include "Crypto/aes.h"
-#include "Crypto/sha1.h"
-#include "util/asm.hpp"
 
 #include "Emu/Cell/lv2/sys_usbd.h"
 
@@ -222,7 +217,7 @@ u32 dimensions_toypad::scramble(const std::array<u8, 7>& uid, u8 count)
 	return read_from_ptr<be_t<u32>>(dimensions_randomize(to_scramble, count).data());
 }
 
-std::array<u8, 4> dimensions_toypad::dimensions_randomize(const std::vector<u8> key, u8 count)
+std::array<u8, 4> dimensions_toypad::dimensions_randomize(const std::vector<u8>& key, u8 count)
 {
 	u32 scrambled = 0;
 	for (u8 i = 0; i < count; i++)
@@ -571,6 +566,16 @@ usb_device_dimensions::usb_device_dimensions(const std::array<u8, 7>& location)
 
 usb_device_dimensions::~usb_device_dimensions()
 {
+}
+
+std::shared_ptr<usb_device> usb_device_dimensions::make_instance(u32, const std::array<u8, 7>& location)
+{
+	return std::make_shared<usb_device_dimensions>(location);
+}
+
+u16 usb_device_dimensions::get_num_emu_devices()
+{
+	return 1;
 }
 
 void usb_device_dimensions::control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 buf_size, u8* buf, UsbTransfer* transfer)

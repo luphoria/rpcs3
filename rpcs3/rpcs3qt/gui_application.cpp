@@ -2,6 +2,7 @@
 #include "gui_application.h"
 
 #include "qt_utils.h"
+#include "permissions.h"
 #include "welcome_dialog.h"
 #include "main_window.h"
 #include "emu_settings.h"
@@ -13,17 +14,20 @@
 #include "qt_camera_handler.h"
 #include "qt_music_handler.h"
 #include "rpcs3_version.h"
+#include "display_sleep_control.h"
 
 #ifdef WITH_DISCORD_RPC
 #include "_discord_utils.h"
 #endif
 
 #include "Emu/Audio/audio_utils.h"
+#include "Emu/Cell/Modules/cellSysutil.h"
 #include "Emu/Io/Null/null_camera_handler.h"
 #include "Emu/Io/Null/null_music_handler.h"
 #include "Emu/vfs_config.h"
 #include "util/init_mutex.hpp"
 #include "util/console.h"
+#include "qt_video_source.h"
 #include "trophy_notification_helper.h"
 #include "save_data_dialog.h"
 #include "msg_dialog_frame.h"
@@ -54,12 +58,17 @@
 #endif
 
 #ifdef _WIN32
-#include "Windows.h"
+#include <Usbiodef.h>
+#include <Dbt.h>
+
+#include "Emu/Cell/lv2/sys_usbd.h"
 #endif
 
 LOG_CHANNEL(gui_log, "GUI");
 
 std::unique_ptr<raw_mouse_handler> g_raw_mouse_handler;
+
+s32 gui_application::m_language_id = static_cast<s32>(CELL_SYSUTIL_LANG_ENGLISH_US);
 
 [[noreturn]] void report_fatal_error(std::string_view text, bool is_html = false, bool include_help_text = true);
 
@@ -72,6 +81,9 @@ gui_application::~gui_application()
 {
 #ifdef WITH_DISCORD_RPC
 	discord::shutdown();
+#endif
+#ifdef _WIN32
+	unregister_device_notification();
 #endif
 }
 
@@ -93,17 +105,15 @@ bool gui_application::Init()
 		msg.setTextFormat(Qt::RichText);
 		msg.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
 		msg.setDefaultButton(QMessageBox::No);
-		msg.setText(tr(
-			R"(
-				<p style="white-space: nowrap;">
-					Please understand that this build is not an official RPCS3 release.<br>
-					This build contains changes that may break games, or even <b>damage</b> your data.<br>
-					We recommend to download and use the official build from the <a %0 href='https://rpcs3.net/download'>RPCS3 website</a>.<br><br>
-					Build origin: %1<br>
-					Do you wish to use this build anyway?
-				</p>
-			)"
-		).arg(gui::utils::get_link_style()).arg(Qt::convertFromPlainText(branch_name.data())));
+		msg.setText(gui::utils::make_paragraph(tr(
+			"Please understand that this build is not an official RPCS3 release.\n"
+			"This build contains changes that may break games, or even <b>damage</b> your data.\n"
+			"We recommend to download and use the official build from the %0.\n"
+			"\n"
+			"Build origin: %1\n"
+			"Do you wish to use this build anyway?")
+			.arg(gui::utils::make_link(tr("RPCS3 website"), "https://rpcs3.net/download"))
+			.arg(Qt::convertFromPlainText(branch_name.data()))));
 		msg.layout()->setSizeConstraint(QLayout::SetFixedSize);
 
 		if (msg.exec() == QMessageBox::No)
@@ -196,6 +206,11 @@ bool gui_application::Init()
 	// Install native event filter
 #ifdef _WIN32 // Currently only needed for raw mouse input on windows
 	installNativeEventFilter(&m_native_event_filter);
+
+	if (m_main_window)
+	{
+		register_device_notification(m_main_window->winId());
+	}
 #endif
 
 	return true;
@@ -217,13 +232,13 @@ void gui_application::SwitchTranslator(QTranslator& translator, const QString& f
 			installTranslator(&translator);
 		}
 	}
-	else if (const QString default_code = QLocale(QLocale::English).bcp47Name(); language_code != default_code)
+	else if (QString default_code = QLocale(QLocale::English).bcp47Name(); language_code != default_code)
 	{
 		// show error, but ignore default case "en", since it is handled in source code
 		gui_log.error("No translation file found in: %s", file_path);
 
 		// reset current language to default "en"
-		m_language_code = default_code;
+		set_language_code(std::move(default_code));
 	}
 }
 
@@ -234,7 +249,7 @@ void gui_application::LoadLanguage(const QString& language_code)
 		return;
 	}
 
-	m_language_code = language_code;
+	set_language_code(language_code);
 
 	const QLocale locale      = QLocale(language_code);
 	const QString locale_name = QLocale::languageToString(locale.language());
@@ -296,6 +311,69 @@ QStringList gui_application::GetAvailableLanguageCodes()
 	return language_codes;
 }
 
+void gui_application::set_language_code(QString language_code)
+{
+	m_language_code = language_code;
+
+	// Transform language code to lowercase and use '-'
+	language_code = language_code.toLower().replace("_", "-");
+
+	// Try to find the CELL language ID for this language code
+	static const std::map<QString, CellSysutilLang> language_ids = {
+		{"ja", CELL_SYSUTIL_LANG_JAPANESE },
+		{"en", CELL_SYSUTIL_LANG_ENGLISH_US },
+		{"en-us", CELL_SYSUTIL_LANG_ENGLISH_US },
+		{"en-gb", CELL_SYSUTIL_LANG_ENGLISH_GB },
+		{"fr", CELL_SYSUTIL_LANG_FRENCH },
+		{"es", CELL_SYSUTIL_LANG_SPANISH },
+		{"de", CELL_SYSUTIL_LANG_GERMAN },
+		{"it", CELL_SYSUTIL_LANG_ITALIAN },
+		{"nl", CELL_SYSUTIL_LANG_DUTCH },
+		{"pt", CELL_SYSUTIL_LANG_PORTUGUESE_PT },
+		{"pt-pt", CELL_SYSUTIL_LANG_PORTUGUESE_PT },
+		{"pt-br", CELL_SYSUTIL_LANG_PORTUGUESE_BR },
+		{"ru", CELL_SYSUTIL_LANG_RUSSIAN },
+		{"ko", CELL_SYSUTIL_LANG_KOREAN },
+		{"zh", CELL_SYSUTIL_LANG_CHINESE_T },
+		{"zh-hant", CELL_SYSUTIL_LANG_CHINESE_T },
+		{"zh-hans", CELL_SYSUTIL_LANG_CHINESE_S },
+		{"fi", CELL_SYSUTIL_LANG_FINNISH },
+		{"sv", CELL_SYSUTIL_LANG_SWEDISH },
+		{"da", CELL_SYSUTIL_LANG_DANISH },
+		{"no", CELL_SYSUTIL_LANG_NORWEGIAN },
+		{"nn", CELL_SYSUTIL_LANG_NORWEGIAN },
+		{"nb", CELL_SYSUTIL_LANG_NORWEGIAN },
+		{"pl", CELL_SYSUTIL_LANG_POLISH },
+		{"tr", CELL_SYSUTIL_LANG_TURKISH },
+	};
+
+	// Check direct match first
+	const auto it = language_ids.find(language_code);
+	if (it != language_ids.cend())
+	{
+		m_language_id = static_cast<s32>(it->second);
+		return;
+	}
+
+	// Try to find closest match
+	for (const auto& [code, id] : language_ids)
+	{
+		if (language_code.startsWith(code))
+		{
+			m_language_id = static_cast<s32>(id);
+			return;
+		}
+	}
+
+	// Fallback to English (US)
+	m_language_id = static_cast<s32>(CELL_SYSUTIL_LANG_ENGLISH_US);
+}
+
+s32 gui_application::get_language_id()
+{
+	return m_language_id;
+}
+
 void gui_application::InitializeConnects()
 {
 	connect(&m_timer, &QTimer::timeout, this, &gui_application::UpdatePlaytime);
@@ -348,6 +426,34 @@ void gui_application::InitializeConnects()
 
 std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 {
+	// Load AppIcon
+	const QIcon app_icon = m_main_window ? m_main_window->GetAppIcon() : gui::utils::get_app_icon_from_path(Emu.GetBoot(), Emu.GetTitleID());
+
+	if (m_game_window)
+	{
+		// Check if the continuous mode is enabled. We reset the mode after each use in order to ensure that it is only used when explicitly needed.
+		const bool continuous_mode_enabled = Emu.ContinuousModeEnabled(true);
+
+		// Make sure we run the same config
+		const bool is_same_renderer = m_game_window->renderer() == g_cfg.video.renderer;
+
+		if (is_same_renderer && (Emu.IsChildProcess() || continuous_mode_enabled))
+		{
+			gui_log.notice("gui_application: Re-using old game window (IsChildProcess=%d, ContinuousModeEnabled=%d)", Emu.IsChildProcess(), continuous_mode_enabled);
+
+			if (!app_icon.isNull())
+			{
+				m_game_window->setIcon(app_icon);
+			}
+			return std::unique_ptr<gs_frame>(m_game_window);
+		}
+
+		// Clean-up old game window. This should only happen if the renderer changed or there was an unexpected error during boot.
+		Emu.GetCallbacks().close_gs_frame();
+	}
+
+	gui_log.notice("gui_application: Creating new game window");
+
 	extern const std::unordered_map<video_resolution, std::pair<int, int>, value_hash<video_resolution>> g_video_out_resolution_map;
 
 	auto [w, h] = ::at32(g_video_out_resolution_map, g_cfg.video.resolution);
@@ -424,9 +530,6 @@ std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 		frame_geometry.setSize(QSize(w, h));
 	}
 
-	// Load AppIcon
-	const QIcon app_icon = m_main_window ? m_main_window->GetAppIcon() : gui::utils::get_app_icon_from_path(Emu.GetBoot(), Emu.GetTitleID());
-
 	gs_frame* frame = nullptr;
 
 	switch (g_cfg.video.renderer.get())
@@ -445,6 +548,27 @@ std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 	}
 
 	m_game_window = frame;
+	ensure(m_game_window);
+
+#ifdef _WIN32
+	if (!m_show_gui)
+	{
+		register_device_notification(m_game_window->winId());
+	}
+#endif
+
+	connect(m_game_window, &gs_frame::destroyed, this, [this]()
+	{
+		gui_log.notice("gui_application: Deleting old game window");
+		m_game_window = nullptr;
+
+#ifdef _WIN32
+		if (!m_show_gui)
+		{
+			unregister_device_notification();
+		}
+#endif
+	});
 
 	return std::unique_ptr<gs_frame>(frame);
 }
@@ -469,6 +593,8 @@ void gui_application::InitializeCallbacks()
 				// Close main window in order to save its window state
 				m_main_window->close();
 			}
+
+			gui_log.notice("Quitting gui application");
 			quit();
 			return true;
 		}
@@ -539,6 +665,16 @@ void gui_application::InitializeCallbacks()
 		return nullptr;
 	};
 
+	callbacks.close_gs_frame  = [this]()
+	{
+		if (m_game_window)
+		{
+			gui_log.warning("gui_application: Closing old game window");
+			m_game_window->ignore_stop_events();
+			delete m_game_window;
+			m_game_window = nullptr;
+		}
+	};
 	callbacks.get_gs_frame    = [this]() -> std::unique_ptr<GSFrameBase> { return get_gs_frame(); };
 	callbacks.get_msg_dialog  = [this]() -> std::shared_ptr<MsgDialogBase> { return m_show_gui ? std::make_shared<msg_dialog_frame>() : nullptr; };
 	callbacks.get_osk_dialog  = [this]() -> std::shared_ptr<OskDialogBase> { return m_show_gui ? std::make_shared<osk_dialog_frame>() : nullptr; };
@@ -582,10 +718,10 @@ void gui_application::InitializeCallbacks()
 		{
 			switch (type)
 			{
-			case 0: static_cast<gs_frame*>(m_game_window)->progress_reset(value); break;
-			case 1: static_cast<gs_frame*>(m_game_window)->progress_increment(value); break;
-			case 2: static_cast<gs_frame*>(m_game_window)->progress_set_limit(value); break;
-			case 3: static_cast<gs_frame*>(m_game_window)->progress_set_value(value); break;
+			case 0: m_game_window->progress_reset(value); break;
+			case 1: m_game_window->progress_increment(value); break;
+			case 2: m_game_window->progress_set_limit(value); break;
+			case 3: m_game_window->progress_set_value(value); break;
 			default: gui_log.fatal("Unknown type in handle_taskbar_progress(type=%d, value=%d)", type, value); break;
 			}
 		}
@@ -770,7 +906,7 @@ void gui_application::InitializeCallbacks()
 							verbose_message += ". ";
 						}
 
-						verbose_message += "If Stuck, Report To Developers";
+						verbose_message += tr("If Stuck, Report To Developers").toStdString();
 					}
 					else
 					{
@@ -810,6 +946,19 @@ void gui_application::InitializeCallbacks()
 			m_main_window->OnAddBreakpoint(addr);
 		});
 	};
+
+	callbacks.display_sleep_control_supported = [](){ return display_sleep_control_supported(); };
+	callbacks.enable_display_sleep = [](bool enabled){ enable_display_sleep(enabled); };
+
+	callbacks.check_microphone_permissions = []()
+	{
+		Emu.BlockingCallFromMainThread([]()
+		{
+			gui::utils::check_microphone_permission();
+		});
+	};
+
+	callbacks.make_video_source = [](){ return std::make_unique<qt_video_source_wrapper>(); };
 
 	Emu.SetCallbacks(std::move(callbacks));
 }
@@ -1045,7 +1194,7 @@ void gui_application::OnShortcutChange()
 {
 	if (m_game_window)
 	{
-		static_cast<gs_frame*>(m_game_window)->update_shortcuts();
+		m_game_window->update_shortcuts();
 	}
 }
 
@@ -1074,7 +1223,7 @@ void gui_application::OnAppStateChanged(Qt::ApplicationState state)
 	}
 
 	const auto emu_state = Emu.GetStatus();
-	const bool is_active = state == Qt::ApplicationActive;
+	const bool is_active = state & Qt::ApplicationActive;
 
 	if (emu_state != system_state::paused && emu_state != system_state::running)
 	{
@@ -1139,15 +1288,24 @@ void gui_application::OnAppStateChanged(Qt::ApplicationState state)
 bool gui_application::native_event_filter::nativeEventFilter([[maybe_unused]] const QByteArray& eventType, [[maybe_unused]] void* message, [[maybe_unused]] qintptr* result)
 {
 #ifdef _WIN32
-	if (!Emu.IsRunning() && !g_raw_mouse_handler)
+	if (!Emu.IsRunning() && !Emu.IsStarting() && !g_raw_mouse_handler)
 	{
 		return false;
 	}
 
 	if (eventType == "windows_generic_MSG")
 	{
-		if (MSG* msg = static_cast<MSG*>(message); msg && msg->message == WM_INPUT)
+		if (MSG* msg = static_cast<MSG*>(message); msg && (msg->message == WM_INPUT || msg->message == WM_KEYDOWN || msg->message == WM_KEYUP || msg->message == WM_DEVICECHANGE))
 		{
+			if (msg->message == WM_DEVICECHANGE && (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE))
+			{
+				if (Emu.IsRunning() || Emu.IsStarting())
+				{
+					handle_hotplug_event(msg->wParam == DBT_DEVICEARRIVAL);
+				}
+				return false;
+			}
+
 			if (auto* handler = g_fxo->try_get<MouseHandlerBase>(); handler && handler->type == mouse_handler::raw)
 			{
 				static_cast<raw_mouse_handler*>(handler)->handle_native_event(*msg);
@@ -1163,3 +1321,40 @@ bool gui_application::native_event_filter::nativeEventFilter([[maybe_unused]] co
 
 	return false;
 }
+
+#ifdef _WIN32
+void gui_application::register_device_notification(WId window_id)
+{
+	if (m_device_notification_handle) return;
+
+	gui_log.notice("Registering device notifications...");
+
+	// Enable usb device hotplug events
+	// Currently only needed for hotplug on windows, as libusb handles other platforms
+	DEV_BROADCAST_DEVICEINTERFACE notification_filter {};
+	notification_filter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+	notification_filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+	notification_filter.dbcc_classguid = GUID_DEVINTERFACE_USB_DEVICE;
+
+	m_device_notification_handle = RegisterDeviceNotification(reinterpret_cast<HWND>(window_id), &notification_filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+	if (!m_device_notification_handle )
+	{
+		gui_log.error("RegisterDeviceNotification() failed: %s", fmt::win_error{GetLastError(), nullptr});
+	}
+}
+
+void gui_application::unregister_device_notification()
+{
+	if (m_device_notification_handle)
+	{
+		gui_log.notice("Unregistering device notifications...");
+
+		if (!UnregisterDeviceNotification(m_device_notification_handle))
+		{
+			gui_log.error("UnregisterDeviceNotification() failed: %s", fmt::win_error{GetLastError(), nullptr});
+		}
+
+		m_device_notification_handle = {};
+	}
+}
+#endif

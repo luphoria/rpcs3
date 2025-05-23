@@ -26,9 +26,10 @@ private Q_SLOTS:
 	void handle_media_status(QMediaPlayer::MediaStatus status);
 	void handle_music_state(QMediaPlayer::PlaybackState state);
 	void handle_music_error(QMediaPlayer::Error error, const QString& errorString);
+	void handle_volume_change(float volume) const;
 
 private:
 	mutable std::mutex m_mutex;
-	std::shared_ptr<QMediaPlayer> m_media_player;
+	std::unique_ptr<QMediaPlayer> m_media_player;
 	std::string m_path;
 };

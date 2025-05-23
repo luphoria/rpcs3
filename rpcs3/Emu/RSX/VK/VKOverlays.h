@@ -52,6 +52,7 @@ namespace vk
 		VkFilter m_sampler_filter = VK_FILTER_LINEAR;
 		u32 m_num_usable_samplers = 1;
 		u32 m_num_input_attachments = 0;
+		u32 m_num_uniform_buffers = 1;
 
 		std::unordered_map<u64, std::unique_ptr<vk::glsl::program>> m_program_cache;
 		std::unique_ptr<vk::sampler> m_sampler;
@@ -153,6 +154,9 @@ namespace vk
 
 		ui_overlay_renderer();
 
+		void upload_simple_texture(vk::image* tex, vk::command_buffer& cmd,
+			vk::data_heap& upload_heap, u32 w, u32 h, u32 layers, bool font, const void* pixel_src);
+
 		vk::image_view* upload_simple_texture(vk::render_device& dev, vk::command_buffer& cmd,
 			vk::data_heap& upload_heap, u64 key, u32 w, u32 h, u32 layers, bool font, bool temp, const void* pixel_src, u32 owner_uid);
 
@@ -163,7 +167,7 @@ namespace vk
 		void remove_temp_resources(u32 key);
 
 		vk::image_view* find_font(rsx::overlays::font* font, vk::command_buffer& cmd, vk::data_heap& upload_heap);
-		vk::image_view* find_temp_image(rsx::overlays::image_info* desc, vk::command_buffer& cmd, vk::data_heap& upload_heap, u32 owner_uid);
+		vk::image_view* find_temp_image(rsx::overlays::image_info_base* desc, vk::command_buffer& cmd, vk::data_heap& upload_heap, u32 owner_uid);
 
 		std::vector<VkPushConstantRange> get_push_constants() override;
 

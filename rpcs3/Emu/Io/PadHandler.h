@@ -5,6 +5,17 @@
 #include "pad_config_types.h"
 #include "util/types.hpp"
 
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
+extern "C" {
+#include "3rdparty/fusion/fusion/Fusion/FusionAhrs.h"
+}
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif
+
 #include <cmath>
 #include <functional>
 #include <string>
@@ -38,6 +49,15 @@ public:
 	};
 	color color_override{};
 	bool color_override_active{};
+
+	bool enable_player_leds{};
+	bool update_player_leds{true};
+
+	std::shared_ptr<FusionAhrs> ahrs; // Used to calculate quaternions from sensor data
+	u64 last_ahrs_update_time_us = 0; // Last ahrs update
+
+	void update_orientation(ps_move_data& move_data);
+	void reset_orientation();
 };
 
 struct pad_ensemble
@@ -125,6 +145,7 @@ protected:
 
 		pressure_intensity_button,
 		analog_limiter_button,
+		orientation_reset_button,
 
 		button_count
 	};
@@ -153,6 +174,7 @@ protected:
 	bool b_has_config = false;
 	bool b_has_pressure_intensity_button = true;
 	bool b_has_analog_limiter_button = true;
+	bool b_has_orientation = false;
 
 	std::array<cfg_pad, MAX_GAMEPADS> m_pad_configs;
 	std::vector<pad_ensemble> m_bindings;
@@ -288,7 +310,7 @@ public:
 	};
 
 	std::vector<pad_ensemble>& bindings() { return m_bindings; }
-	std::string name_string() const { return m_name_string; }
+	const std::string& name_string() const { return m_name_string; }
 	usz max_devices() const { return m_max_devices; }
 	bool has_config() const { return b_has_config; }
 	bool has_rumble() const { return b_has_rumble; }
@@ -301,6 +323,7 @@ public:
 	bool has_battery_led() const { return b_has_battery_led; }
 	bool has_pressure_intensity_button() const { return b_has_pressure_intensity_button; }
 	bool has_analog_limiter_button() const { return b_has_analog_limiter_button; }
+	bool has_orientation() const { return b_has_orientation; }
 
 	u16 NormalizeStickInput(u16 raw_value, s32 threshold, s32 multiplier, bool ignore_threshold = false) const;
 	void convert_stick_values(u16& x_out, u16& y_out, s32 x_in, s32 y_in, u32 deadzone, u32 anti_deadzone, u32 padsquircling) const;
@@ -323,6 +346,18 @@ public:
 	virtual void get_motion_sensors(const std::string& pad_id, const motion_callback& callback, const motion_fail_callback& fail_callback, motion_preview_values preview_values, const std::array<AnalogSensor, 4>& sensors);
 	virtual std::unordered_map<u32, std::string> get_motion_axis_list() const { return {}; }
 
+	static constexpr f32 PI = 3.14159265f;
+
+	static f32 degree_to_rad(f32 degree)
+	{
+		return degree * PI / 180.0f;
+	}
+
+	static f32 rad_to_degree(f32 radians)
+	{
+		return radians * 180.0f / PI;
+	};
+
 private:
 	virtual std::shared_ptr<PadDevice> get_device(const std::string& /*device*/) { return nullptr; }
 	virtual bool get_is_left_trigger(const std::shared_ptr<PadDevice>& /*device*/, u64 /*keyCode*/) { return false; }
@@ -336,10 +371,15 @@ private:
 	virtual std::unordered_map<u64, u16> get_button_values(const std::shared_ptr<PadDevice>& /*device*/) { return {}; }
 	virtual pad_preview_values get_preview_values(const std::unordered_map<u64, u16>& /*data*/) { return {}; }
 
+	void get_orientation(const pad_ensemble& binding) const;
+
 protected:
 	virtual std::array<std::set<u32>, PadHandlerBase::button::button_count> get_mapped_key_codes(const std::shared_ptr<PadDevice>& device, const cfg_pad* cfg);
 	virtual void get_mapping(const pad_ensemble& binding);
 	void TranslateButtonPress(const std::shared_ptr<PadDevice>& device, u64 keyCode, bool& pressed, u16& val, bool use_stick_multipliers, bool ignore_stick_threshold = false, bool ignore_trigger_threshold = false);
 	void init_configs();
 	cfg_pad* get_config(const std::string& pad_id);
+
+	static void set_raw_orientation(ps_move_data& move_data, f32 accel_x, f32 accel_y, f32 accel_z, f32 gyro_x, f32 gyro_y, f32 gyro_z);
+	static void set_raw_orientation(Pad& pad);
 };

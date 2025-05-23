@@ -4,6 +4,7 @@
 #include "GLGSRender.h"
 #include "GLCompute.h"
 #include "GLDMA.h"
+#include "GLResolveHelper.h"
 
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/RSX/rsx_methods.h"
@@ -39,17 +40,31 @@ u64 GLGSRender::get_cycles()
 
 GLGSRender::GLGSRender(utils::serial* ar) noexcept : GSRender(ar)
 {
-	m_shaders_cache = std::make_unique<gl::shader_cache>(m_prog_buffer, "opengl", "v1.94");
+	m_shaders_cache = std::make_unique<gl::shader_cache>(m_prog_buffer, "opengl", "v1.95");
 
 	if (g_cfg.video.disable_vertex_cache)
 		m_vertex_cache = std::make_unique<gl::null_vertex_cache>();
 	else
 		m_vertex_cache = std::make_unique<gl::weak_vertex_cache>();
 
-	backend_config.supports_hw_a2c = false;
-	backend_config.supports_hw_a2one = false;
 	backend_config.supports_multidraw = true;
 	backend_config.supports_normalized_barycentrics = true;
+
+	if (g_cfg.video.antialiasing_level != msaa_level::none)
+	{
+		backend_config.supports_hw_msaa = true;
+		backend_config.supports_hw_a2c = true;
+		backend_config.supports_hw_a2c_1spp = false; // In OGL A2C is implicitly disabled at 1spp
+		backend_config.supports_hw_a2one = true;
+	}
+}
+
+GLGSRender::~GLGSRender()
+{
+	if (m_frame)
+	{
+		m_frame->reset();
+	}
 }
 
 extern CellGcmContextData current_context;
@@ -136,12 +151,12 @@ void GLGSRender::on_init_thread()
 	auto& gl_caps = gl::get_driver_caps();
 
 	std::vector<std::string> exception_reasons;
-	if (!gl_caps.ARB_texture_buffer_supported)
+	if (!gl_caps.ARB_texture_buffer_object_supported)
 	{
 		exception_reasons.push_back("GL_ARB_texture_buffer_object is required but not supported by your GPU");
 	}
 
-	if (!gl_caps.ARB_dsa_supported && !gl_caps.EXT_dsa_supported)
+	if (!gl_caps.ARB_direct_state_access_supported && !gl_caps.EXT_direct_state_access_supported)
 	{
 		exception_reasons.push_back("GL_ARB_direct_state_access or GL_EXT_direct_state_access is required but not supported by your GPU");
 	}
@@ -183,7 +198,7 @@ void GLGSRender::on_init_thread()
 		backend_config.supports_normalized_barycentrics = false;
 	}
 
-	if (gl_caps.AMD_pinned_memory && g_cfg.video.host_label_synchronization)
+	if (gl_caps.AMD_pinned_memory_supported && g_cfg.video.host_label_synchronization)
 	{
 		backend_config.supports_host_gpu_labels = true;
 
@@ -221,13 +236,13 @@ void GLGSRender::on_init_thread()
 
 	// Array stream buffer
 	{
-		m_gl_persistent_stream_buffer = std::make_unique<gl::texture>(GL_TEXTURE_BUFFER, 0, 0, 0, 0, GL_R8UI);
+		m_gl_persistent_stream_buffer = std::make_unique<gl::texture>(GL_TEXTURE_BUFFER, 0, 0, 0, 0, 0, GL_R8UI, RSX_FORMAT_CLASS_DONT_CARE);
 		gl_state.bind_texture(GL_STREAM_BUFFER_START + 0, GL_TEXTURE_BUFFER, m_gl_persistent_stream_buffer->id());
 	}
 
 	// Register stream buffer
 	{
-		m_gl_volatile_stream_buffer = std::make_unique<gl::texture>(GL_TEXTURE_BUFFER, 0, 0, 0, 0, GL_R8UI);
+		m_gl_volatile_stream_buffer = std::make_unique<gl::texture>(GL_TEXTURE_BUFFER, 0, 0, 0, 0, 0, GL_R8UI, RSX_FORMAT_CLASS_DONT_CARE);
 		gl_state.bind_texture(GL_STREAM_BUFFER_START + 1, GL_TEXTURE_BUFFER, m_gl_volatile_stream_buffer->id());
 	}
 
@@ -236,19 +251,19 @@ void GLGSRender::on_init_thread()
 		std::array<u32, 8> pixeldata = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 		// 1D
-		auto tex1D = std::make_unique<gl::texture>(GL_TEXTURE_1D, 1, 1, 1, 1, GL_RGBA8);
+		auto tex1D = std::make_unique<gl::texture>(GL_TEXTURE_1D, 1, 1, 1, 1, 1, GL_RGBA8, RSX_FORMAT_CLASS_COLOR);
 		tex1D->copy_from(pixeldata.data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
 
 		// 2D
-		auto tex2D = std::make_unique<gl::texture>(GL_TEXTURE_2D, 1, 1, 1, 1, GL_RGBA8);
+		auto tex2D = std::make_unique<gl::texture>(GL_TEXTURE_2D, 1, 1, 1, 1, 1, GL_RGBA8, RSX_FORMAT_CLASS_COLOR);
 		tex2D->copy_from(pixeldata.data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
 
 		// 3D
-		auto tex3D = std::make_unique<gl::texture>(GL_TEXTURE_3D, 1, 1, 1, 1, GL_RGBA8);
+		auto tex3D = std::make_unique<gl::texture>(GL_TEXTURE_3D, 1, 1, 1, 1, 1, GL_RGBA8, RSX_FORMAT_CLASS_COLOR);
 		tex3D->copy_from(pixeldata.data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
 
 		// CUBE
-		auto texCUBE = std::make_unique<gl::texture>(GL_TEXTURE_CUBE_MAP, 1, 1, 1, 1, GL_RGBA8);
+		auto texCUBE = std::make_unique<gl::texture>(GL_TEXTURE_CUBE_MAP, 1, 1, 1, 1, 1, GL_RGBA8, RSX_FORMAT_CLASS_COLOR);
 		texCUBE->copy_from(pixeldata.data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
 
 		m_null_textures[GL_TEXTURE_1D] = std::move(tex1D);
@@ -281,6 +296,7 @@ void GLGSRender::on_init_thread()
 		m_fragment_instructions_buffer = std::make_unique<gl::legacy_ring_buffer>();
 		m_raster_env_ring_buffer = std::make_unique<gl::legacy_ring_buffer>();
 		m_scratch_ring_buffer = std::make_unique<gl::legacy_ring_buffer>();
+		m_instancing_ring_buffer = std::make_unique<gl::legacy_ring_buffer>();
 	}
 	else
 	{
@@ -296,6 +312,7 @@ void GLGSRender::on_init_thread()
 		m_fragment_instructions_buffer = std::make_unique<gl::ring_buffer>();
 		m_raster_env_ring_buffer = std::make_unique<gl::ring_buffer>();
 		m_scratch_ring_buffer = std::make_unique<gl::ring_buffer>();
+		m_instancing_ring_buffer = std::make_unique<gl::ring_buffer>();
 	}
 
 	m_attrib_ring_buffer->create(gl::buffer::target::texture, 256 * 0x100000);
@@ -308,6 +325,7 @@ void GLGSRender::on_init_thread()
 	m_vertex_layout_buffer->create(gl::buffer::target::uniform, 16 * 0x100000);
 	m_raster_env_ring_buffer->create(gl::buffer::target::uniform, 16 * 0x100000);
 	m_scratch_ring_buffer->create(gl::buffer::target::uniform, 16 * 0x100000);
+	m_instancing_ring_buffer->create(gl::buffer::target::ssbo, 128 * 0x100000);
 
 	if (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only)
 	{
@@ -415,6 +433,7 @@ void GLGSRender::on_exit()
 	gl::destroy_compute_tasks();
 	gl::destroy_overlay_passes();
 	gl::clear_dma_resources();
+	gl::clear_resolve_helpers();
 
 	gl::destroy_global_texture_resources();
 
@@ -529,6 +548,11 @@ void GLGSRender::on_exit()
 	if (m_scratch_ring_buffer)
 	{
 		m_scratch_ring_buffer->remove();
+	}
+
+	if (m_instancing_ring_buffer)
+	{
+		m_instancing_ring_buffer->remove();
 	}
 
 	m_null_textures.clear();
@@ -754,19 +778,38 @@ bool GLGSRender::load_program()
 
 		if (shadermode == shader_mode::interpreter_only)
 		{
-			m_program = m_shader_interpreter.get(current_fp_metadata);
+			m_program = m_shader_interpreter.get(
+				current_fp_metadata,
+				current_vertex_program.ctrl,
+				current_fragment_program.ctrl);
 			return true;
 		}
 	}
 
-	const bool was_interpreter = m_shader_interpreter.is_interpreter(m_program);
 	m_vertex_prog = nullptr;
 	m_fragment_prog = nullptr;
 
 	if (shadermode != shader_mode::interpreter_only) [[likely]]
 	{
+		if (g_cfg.video.debug_overlay)
+		{
+			m_frame_stats.program_cache_lookups_total += 2;
+			if (m_program_cache_hint.has_fragment_program())
+			{
+				m_frame_stats.program_cache_lookups_ellided++;
+			}
+			if (m_program_cache_hint.has_vertex_program())
+			{
+				m_frame_stats.program_cache_lookups_ellided++;
+			}
+		}
+
 		void* pipeline_properties = nullptr;
-		std::tie(m_program, m_vertex_prog, m_fragment_prog) = m_prog_buffer.get_graphics_pipeline(current_vertex_program, current_fragment_program, pipeline_properties,
+		std::tie(m_program, m_vertex_prog, m_fragment_prog) = m_prog_buffer.get_graphics_pipeline(
+			&m_program_cache_hint,
+			current_vertex_program,
+			current_fragment_program,
+			pipeline_properties,
 			shadermode != shader_mode::recompiler, true);
 
 		if (m_prog_buffer.check_cache_missed())
@@ -788,14 +831,34 @@ bool GLGSRender::load_program()
 		m_program = nullptr;
 	}
 
-	if (!m_program && (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only))
+	if (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only)
 	{
-		// Fall back to interpreter
-		m_program = m_shader_interpreter.get(current_fp_metadata);
-		if (was_interpreter != m_shader_interpreter.is_interpreter(m_program))
+		const bool is_interpreter = !m_program;
+		const bool was_interpreter = m_shader_interpreter.is_interpreter(m_prev_program);
+
+		// First load the next program if not available
+		if (!m_program)
 		{
+			m_program = m_shader_interpreter.get(
+				current_fp_metadata,
+				current_vertex_program.ctrl,
+				current_fragment_program.ctrl);
+
 			// Program has changed, reupload
 			m_interpreter_state = rsx::invalidate_pipeline_bits;
+		}
+
+		// If swapping between interpreter and recompiler, we need to adjust some flags to reupload data as needed.
+		if (is_interpreter != was_interpreter)
+		{
+			// Always reupload transform constants when going between interpreter and recompiler
+			m_graphics_state |= rsx::transform_constants_dirty;
+
+			// Always reload fragment constansts when moving from interpreter back to recompiler.
+			if (was_interpreter)
+			{
+				m_graphics_state |= rsx::fragment_constants_dirty;
+			}
 		}
 	}
 
@@ -817,7 +880,8 @@ void GLGSRender::load_program_env()
 	const bool update_fragment_env = m_graphics_state & rsx::pipeline_state::fragment_state_dirty;
 	const bool update_fragment_texture_env = m_graphics_state & rsx::pipeline_state::fragment_texture_state_dirty;
 	const bool update_instruction_buffers = !!m_interpreter_state && m_shader_interpreter.is_interpreter(m_program);
-	const bool update_raster_env = rsx::method_registers.polygon_stipple_enabled() && (m_graphics_state & rsx::pipeline_state::polygon_stipple_pattern_dirty);
+	const bool update_raster_env = REGS(m_ctx)->polygon_stipple_enabled() && (m_graphics_state & rsx::pipeline_state::polygon_stipple_pattern_dirty);
+	const bool update_instancing_data = REGS(m_ctx)->current_draw_clause.is_trivial_instanced_draw;
 
 	if (manually_flush_ring_buffers)
 	{
@@ -827,6 +891,7 @@ void GLGSRender::load_program_env()
 		if (update_fragment_constants) m_fragment_constants_buffer->reserve_storage_on_heap(utils::align(fragment_constants_size, 256));
 		if (update_transform_constants) m_transform_constants_buffer->reserve_storage_on_heap(8192);
 		if (update_raster_env) m_raster_env_ring_buffer->reserve_storage_on_heap(128);
+		if (update_instancing_data) m_instancing_ring_buffer->reserve_storage_on_heap(8192 * REGS(m_ctx)->current_draw_clause.pass_count());
 
 		if (update_instruction_buffers)
 		{
@@ -850,6 +915,33 @@ void GLGSRender::load_program_env()
 		m_vertex_env_buffer->bind_range(GL_VERTEX_PARAMS_BIND_SLOT, mapping.second, 144);
 	}
 
+	if (update_instancing_data)
+	{
+		// Combines transform load + instancing lookup table
+		const auto alignment = m_min_ssbo_alignment;
+		u32 indirection_table_offset = 0;
+		u32 constants_data_table_offset = 0;
+
+		rsx::io_buffer indirection_table_buf([&](usz size) -> std::pair<void*, usz>
+		{
+			const auto mapping = m_instancing_ring_buffer->alloc_from_heap(static_cast<u32>(size), alignment);
+			indirection_table_offset = mapping.second;
+			return mapping;
+		});
+
+		rsx::io_buffer constants_array_buf([&](usz size) -> std::pair<void*, usz>
+		{
+			const auto mapping = m_instancing_ring_buffer->alloc_from_heap(static_cast<u32>(size), alignment);
+			constants_data_table_offset = mapping.second;
+			return mapping;
+		});
+
+		m_draw_processor.fill_constants_instancing_buffer(indirection_table_buf, constants_array_buf, m_vertex_prog);
+
+		m_instancing_ring_buffer->bind_range(GL_INSTANCING_LUT_BIND_SLOT, indirection_table_offset, ::size32(indirection_table_buf));
+		m_instancing_ring_buffer->bind_range(GL_INSTANCING_XFORM_CONSTANTS_SLOT, constants_data_table_offset, ::size32(constants_array_buf));
+	}
+
 	if (update_transform_constants)
 	{
 		// Vertex constants
@@ -870,7 +962,7 @@ void GLGSRender::load_program_env()
 		}
 	}
 
-	if (update_fragment_constants && !update_instruction_buffers)
+	if (update_fragment_constants && !m_shader_interpreter.is_interpreter(m_program))
 	{
 		// Fragment constants
 		auto mapping = m_fragment_constants_buffer->alloc_from_heap(fragment_constants_size, m_uniform_buffer_offset_align);
@@ -962,6 +1054,7 @@ void GLGSRender::load_program_env()
 		if (update_fragment_constants) m_fragment_constants_buffer->unmap();
 		if (update_transform_constants) m_transform_constants_buffer->unmap();
 		if (update_raster_env) m_raster_env_ring_buffer->unmap();
+		if (update_instancing_data) m_instancing_ring_buffer->unmap();
 
 		if (update_instruction_buffers)
 		{
@@ -970,17 +1063,35 @@ void GLGSRender::load_program_env()
 		}
 	}
 
-	m_graphics_state.clear(
+	rsx::flags32_t handled_flags =
 		rsx::pipeline_state::fragment_state_dirty |
 		rsx::pipeline_state::vertex_state_dirty |
 		rsx::pipeline_state::transform_constants_dirty |
-		rsx::pipeline_state::fragment_constants_dirty |
-		rsx::pipeline_state::fragment_texture_state_dirty);
+		rsx::pipeline_state::fragment_texture_state_dirty;
+
+	if (update_fragment_constants && !m_shader_interpreter.is_interpreter(m_program))
+	{
+		handled_flags |= rsx::pipeline_state::fragment_constants_dirty;
+	}
+
+	if (m_shader_interpreter.is_interpreter(m_program))
+	{
+		ensure(m_transform_constants_buffer->bound_range().second >= 468 * 16);
+	}
+
+	m_graphics_state.clear(handled_flags);
+}
+
+bool GLGSRender::is_current_program_interpreted() const
+{
+	return m_program && m_shader_interpreter.is_interpreter(m_program);
 }
 
 void GLGSRender::upload_transform_constants(const rsx::io_buffer& buffer)
 {
-	const usz transform_constants_size = (!m_vertex_prog || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
+	const bool is_interpreter = m_shader_interpreter.is_interpreter(m_program);
+	const usz transform_constants_size = (is_interpreter || m_vertex_prog->has_indexed_constants) ? 8192 : m_vertex_prog->constant_ids.size() * 16;
+
 	if (transform_constants_size)
 	{
 		const auto constant_ids = (transform_constants_size == 8192)
@@ -1026,10 +1137,16 @@ void GLGSRender::update_vertex_env(const gl::vertex_upload_info& upload_info)
 
 void GLGSRender::patch_transform_constants(rsx::context* ctx, u32 index, u32 count)
 {
-	if (!m_vertex_prog)
+	if (!m_program || !m_vertex_prog)
 	{
 		// Shouldn't be reachable, but handle it correctly anyway
 		m_graphics_state |= rsx::pipeline_state::transform_constants_dirty;
+		return;
+	}
+
+	if (!m_vertex_prog->overlaps_constants_range(index, count))
+	{
+		// Nothing meaningful to us
 		return;
 	}
 
@@ -1046,7 +1163,7 @@ void GLGSRender::patch_transform_constants(rsx::context* ctx, u32 index, u32 cou
 		data_range = { bound_range.first + byte_offset, byte_count};
 		data_source = &REGS(ctx)->transform_constants[index];
 	}
-	else if (auto xform_id = m_vertex_prog->TranslateConstantsRange(index, count); xform_id >= 0)
+	else if (auto xform_id = m_vertex_prog->translate_constants_range(index, count); xform_id >= 0)
 	{
 		const auto write_offset = xform_id * 16;
 		const auto byte_count = count * 16;

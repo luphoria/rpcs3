@@ -13,6 +13,7 @@ add_library(rpcs3_ui STATIC
     curl_handle.cpp
     custom_dialog.cpp
     custom_table_widget_item.cpp
+    debugger_add_bp_window.cpp
     debugger_frame.cpp
     debugger_list.cpp
     downloader.cpp
@@ -21,6 +22,7 @@ add_library(rpcs3_ui STATIC
     emu_settings.cpp
     elf_memory_dumping_dialog.cpp
     emulated_pad_settings_dialog.cpp
+    emulated_logitech_g27_settings_dialog.cpp
     fatal_error_dialog.cpp
     find_dialog.cpp
     flow_layout.cpp
@@ -37,6 +39,7 @@ add_library(rpcs3_ui STATIC
     gui_application.cpp
     gl_gs_frame.cpp
     gs_frame.cpp
+    gui_game_info.cpp
     gui_settings.cpp
     infinity_dialog.cpp
     input_dialog.cpp
@@ -55,12 +58,14 @@ add_library(rpcs3_ui STATIC
     movie_item.cpp
     movie_item_base.cpp
     msg_dialog_frame.cpp
+    music_player_dialog.cpp
     osk_dialog_frame.cpp
     pad_led_settings_dialog.cpp
     pad_motion_settings_dialog.cpp
     pad_settings_dialog.cpp
     patch_creator_dialog.cpp
     patch_manager_dialog.cpp
+    permissions.cpp
     persistent_settings.cpp
     pkg_install_dialog.cpp
     progress_dialog.cpp
@@ -70,6 +75,7 @@ add_library(rpcs3_ui STATIC
     qt_camera_video_sink.cpp
     qt_music_handler.cpp
     qt_utils.cpp
+    qt_video_source.cpp
     raw_mouse_settings_dialog.cpp
     register_editor_dialog.cpp
     recvmessage_dialog_frame.cpp
@@ -80,6 +86,7 @@ add_library(rpcs3_ui STATIC
     save_data_info_dialog.cpp
     save_data_list_dialog.cpp
     save_manager_dialog.cpp
+    savestate_manager_dialog.cpp
     screenshot_item.cpp
     screenshot_manager_dialog.cpp
     screenshot_preview.cpp
@@ -108,11 +115,13 @@ add_library(rpcs3_ui STATIC
     vfs_dialog_usb_input.cpp
     vfs_dialog_usb_tab.cpp
     vfs_tool_dialog.cpp
+    video_label.cpp
     welcome_dialog.cpp
 
     about_dialog.ui
     camera_settings_dialog.ui
     main_window.ui
+    music_player_dialog.ui
     pad_led_settings_dialog.ui
     pad_motion_settings_dialog.ui
     pad_settings_dialog.ui
@@ -123,8 +132,43 @@ add_library(rpcs3_ui STATIC
     shortcut_dialog.ui
     welcome_dialog.ui
 
+    ../display_sleep_control.cpp
+    ../headless_application.cpp
+    ../main_application.cpp
+    ../module_verifier.cpp
+    ../rpcs3.cpp
+    ../rpcs3_version.cpp
+    ../stdafx.cpp
+
+    ../Input/basic_keyboard_handler.cpp
+    ../Input/basic_mouse_handler.cpp
+    ../Input/ds3_pad_handler.cpp
+    ../Input/ds4_pad_handler.cpp
+    ../Input/dualsense_pad_handler.cpp
+    ../Input/evdev_joystick_handler.cpp
+    ../Input/gui_pad_thread.cpp
+    ../Input/hid_pad_handler.cpp
+    ../Input/keyboard_pad_handler.cpp
+    ../Input/mm_joystick_handler.cpp
+    ../Input/pad_thread.cpp
+    ../Input/product_info.cpp
+    ../Input/ps_move_calibration.cpp
+    ../Input/ps_move_config.cpp
+    ../Input/ps_move_handler.cpp
+    ../Input/ps_move_tracker.cpp
+    ../Input/raw_mouse_config.cpp
+    ../Input/raw_mouse_handler.cpp
+    ../Input/sdl_pad_handler.cpp
+    ../Input/sdl_instance.cpp
+    ../Input/skateboard_pad_handler.cpp
+    ../Input/xinput_pad_handler.cpp
+
     "../resources.qrc"
 )
+
+if(HAS_MEMORY_BREAKPOINTS)
+    target_compile_definitions(rpcs3_ui PRIVATE RPCS3_HAS_MEMORY_BREAKPOINTS)
+endif()
 
 if(WIN32)
     target_sources(rpcs3_ui PUBLIC "../windows.qrc")
@@ -145,20 +189,20 @@ target_compile_definitions(rpcs3_ui PRIVATE WIN32_LEAN_AND_MEAN)
 
 target_link_libraries(rpcs3_ui
     PUBLIC
+        rpcs3_emu
         3rdparty::qt6
         3rdparty::yaml-cpp
-
-    PRIVATE
-        rpcs3_emu
         3rdparty::zlib
-        3rdparty::pugixml
         3rdparty::discordRPC
         3rdparty::hidapi
         3rdparty::libusb
-        3rdparty::libpng
-        3rdparty::7zip
         3rdparty::wolfssl
         3rdparty::libcurl
         3rdparty::opencv
         3rdparty::fusion
+
+    PRIVATE
+        3rdparty::pugixml
+        3rdparty::libpng
+        3rdparty::7zip
         3rdparty::rtmidi)

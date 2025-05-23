@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "nv406e.h"
-#include "common.h"
 #include "nv47_sync.hpp"
 
 #include "Emu/RSX/RSXThread.h"
@@ -16,7 +15,7 @@ namespace rsx
 			RSX(ctx)->sync();
 
 			// Write ref+get (get will be written again with the same value at command end)
-			auto& dma = vm::_ref<RsxDmaControl>(RSX(ctx)->dma_address);
+			auto& dma = *vm::_ptr<RsxDmaControl>(RSX(ctx)->dma_address);
 			dma.get.release(RSX(ctx)->fifo_ctrl->get_pos());
 			dma.ref.store(arg);
 		}
@@ -26,7 +25,10 @@ namespace rsx
 			RSX(ctx)->sync_point_request.release(true);
 			const u32 addr = get_address(REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e());
 
-			const auto& sema = vm::_ref<RsxSemaphore>(addr).val;
+			// Syncronization point, may be associated with memory changes without actually changing addresses
+			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
+
+			const auto& sema = vm::_ref<RsxSemaphore>(addr);
 
 			if (sema == arg)
 			{

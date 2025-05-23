@@ -141,7 +141,8 @@ s32 lv2_socket_p2p::bind(const sys_net_sockaddr& addr)
 					p2p_vport++;
 				}
 			}
-			else if (pport.bound_p2p_vports.contains(p2p_vport))
+			
+			if (pport.bound_p2p_vports.contains(p2p_vport))
 			{
 				// Check that all other sockets are SO_REUSEADDR or SO_REUSEPORT
 				auto& bound_sockets = ::at32(pport.bound_p2p_vports, p2p_vport);
@@ -164,7 +165,7 @@ s32 lv2_socket_p2p::bind(const sys_net_sockaddr& addr)
 		std::lock_guard lock(mutex);
 		port       = p2p_port;
 		vport      = p2p_vport;
-		socket     = real_socket;
+		native_socket = real_socket;
 		bound_addr = psa_in_p2p->sin_addr;
 	}
 
@@ -176,7 +177,7 @@ std::pair<s32, sys_net_sockaddr> lv2_socket_p2p::getsockname()
 	std::lock_guard lock(mutex);
 
 	// Unbound socket
-	if (!socket)
+	if (!native_socket)
 	{
 		return {CELL_OK, {}};
 	}
@@ -273,7 +274,7 @@ std::optional<s32> lv2_socket_p2p::sendto(s32 flags, const std::vector<u8>& buf,
 	}
 
 	ensure(opt_sn_addr);
-	ensure(socket);                              // ensures it has been bound
+	ensure(native_socket); // ensures it has been bound
 	ensure(buf.size() <= static_cast<usz>(65535 - VPORT_P2P_HEADER_SIZE)); // catch games using full payload for future fragmentation implementation if necessary
 	const u16 p2p_port  = reinterpret_cast<const sys_net_sockaddr_in*>(&*opt_sn_addr)->sin_port;
 	const u16 p2p_vport = reinterpret_cast<const sys_net_sockaddr_in_p2p*>(&*opt_sn_addr)->sin_vport;
@@ -299,7 +300,7 @@ std::optional<s32> lv2_socket_p2p::sendto(s32 flags, const std::vector<u8>& buf,
 		native_flags |= MSG_WAITALL;
 	}
 
-	auto native_result = ::sendto(socket, reinterpret_cast<const char*>(p2p_data.data()), ::size32(p2p_data), native_flags, reinterpret_cast<struct sockaddr*>(&native_addr), sizeof(native_addr));
+	auto native_result = np::sendto_possibly_ipv6(native_socket, reinterpret_cast<const char*>(p2p_data.data()), ::size32(p2p_data), &native_addr, native_flags);
 
 	if (native_result >= 0)
 	{

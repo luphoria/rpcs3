@@ -1,4 +1,5 @@
 #include "instruction_editor_dialog.h"
+#include "hex_validator.h"
 
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/CPU/CPUThread.h"
@@ -21,7 +22,7 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, C
 	: QDialog(parent)
 	, m_pc(_pc)
 	, m_disasm(_disasm->copy_type_erased())
-	, m_get_cpu(std::move(func))
+	, m_get_cpu(func ? std::move(func) : std::function<cpu_thread*()>(FN(nullptr)))
 {
 	setWindowTitle(tr("Edit instruction"));
 	setAttribute(Qt::WA_DeleteOnClose);
@@ -44,8 +45,8 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, C
 
 	m_instr = new QLineEdit(this);
 	m_instr->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-	m_instr->setMaxLength(8);
-	m_instr->setMaximumWidth(65);
+	m_instr->setValidator(new HexValidator(m_instr));
+	m_instr->setMaximumWidth(130);
 
 	m_disasm->change_mode(cpu_disasm_mode::normal);
 	m_disasm->disasm(m_pc);
@@ -109,7 +110,7 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, C
 		}
 
 		bool ok;
-		const ulong opcode = m_instr->text().toULong(&ok, 16);
+		const ulong opcode = normalize_hex_qstring(m_instr->text()).toULong(&ok, 16);
 		if (!ok || opcode > u32{umax})
 		{
 			QMessageBox::critical(this, tr("Error"), tr("Failed to parse PPU instruction."));
@@ -152,7 +153,7 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, C
 void instruction_editor_dialog::updatePreview() const
 {
 	bool ok;
-	const be_t<u32> opcode{static_cast<u32>(m_instr->text().toULong(&ok, 16))};
+	const be_t<u32> opcode{static_cast<u32>(normalize_hex_qstring(m_instr->text()).toULong(&ok, 16))};
 	m_disasm->change_ptr(reinterpret_cast<const u8*>(&opcode) - std::intptr_t{m_pc});
 
 	if (ok && m_disasm->disasm(m_pc))

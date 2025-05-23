@@ -4,8 +4,6 @@
 #include "Emu/vfs_config.h"
 #include "Emu/system_utils.hpp"
 #include "Emu/System.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/Thread.h"
 
 namespace rsx
 {
@@ -19,7 +17,7 @@ namespace rsx
 
 			if (fs::exists(avatar_path))
 			{
-				icon_data = std::make_unique<image_info>(avatar_path.c_str());
+				icon_data = std::make_unique<image_info>(avatar_path);
 				static_cast<image_view*>(image.get())->set_raw_image(icon_data.get());
 			}
 			else

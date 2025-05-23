@@ -71,25 +71,43 @@ namespace rsx
 			m_scroll_indicator_bottom->fore_color.a = 0.f;
 		}
 
-		void list_view::update_selection()
+		const overlay_element* list_view::get_selected_entry() const
 		{
 			if (m_selected_entry < 0)
 			{
-				return; // Ideally unreachable but it should still be possible to recover by user interaction.
+				return nullptr; // Ideally unreachable but it should still be possible to recover by user interaction.
 			}
 
 			const usz current_index = static_cast<usz>(m_selected_entry) * (m_use_separators ? 2 : 1);
 
-			if (m_items.size() <= current_index)
+			if (current_index >= m_items.size())
+			{
+				return nullptr; // Ideally unreachable but it should still be possible to recover by user interaction.
+			}
+
+			return m_items[current_index].get();
+		}
+
+		void list_view::update_selection()
+		{
+			const overlay_element* current_element = get_selected_entry();
+
+			for (auto& item : m_items)
+			{
+				if (item)
+				{
+					item->set_selected(item.get() == current_element);
+				}
+			}
+
+			if (!current_element)
 			{
 				return; // Ideally unreachable but it should still be possible to recover by user interaction.
 			}
 
-			auto current_element = m_items[current_index].get();
-
 			// Calculate bounds
-			auto min_y = current_element->y - y;
-			auto max_y = current_element->y + current_element->h + pack_padding + 2 - y;
+			const auto min_y = current_element->y - y;
+			const auto max_y = current_element->y + current_element->h + pack_padding + 2 - y;
 
 			if (min_y < scroll_offset_value)
 			{
@@ -186,7 +204,7 @@ namespace rsx
 				m_cancel_btn->set_pos(x + 180, y + h + 20);
 
 			m_cancel_only = cancel_only;
-			is_compiled   = false;
+			m_is_compiled = false;
 		}
 
 		bool list_view::get_cancel_only() const
@@ -210,7 +228,7 @@ namespace rsx
 
 		compiled_resource& list_view::get_compiled()
 		{
-			if (!is_compiled)
+			if (!is_compiled())
 			{
 				auto& compiled = vertical_layout::get_compiled();
 				compiled.add(m_highlight_box->get_compiled());

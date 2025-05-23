@@ -6,7 +6,7 @@
 namespace utils
 {
 	template <typename T>
-	concept FastRandomAccess = requires (T& obj)
+	concept FastRandomAccess = requires (const T& obj)
 	{
 		std::data(obj)[std::size(obj)];
 	};
@@ -18,20 +18,17 @@ namespace utils
 	};
 
 	template <typename T>
-	concept Bitcopy = (std::is_arithmetic_v<T>) || (std::is_enum_v<T>) || Integral<T> || requires ()
+	concept Bitcopy = (std::is_arithmetic_v<T>) || (std::is_enum_v<T>) || Integral<T> || typename T::enable_bitcopy()();
+
+	template <typename T>
+	concept TupleAlike = (!FastRandomAccess<T>) && requires ()
 	{
-		std::enable_if_t<std::conjunction_v<typename T::enable_bitcopy>>();
+		std::tuple_size<std::remove_cvref_t<T>>::value;
 	};
 
 	template <typename T>
-	concept TupleAlike = requires ()
-	{
-		std::tuple_size<std::remove_cv_t<T>>::value;
-	};
 
-	template <typename T>
-	concept ListAlike = requires (T& obj) { obj.insert(obj.end(), std::declval<typename T::value_type>()); };
-
+	concept ListAlike = requires(std::remove_cvref_t<T>& obj, T::value_type item) { obj.insert(obj.end(), std::move(item)); };
 	struct serial;
 
 	struct serialization_file_handler
@@ -124,7 +121,7 @@ public:
 			m_expect_little_data = value;
 		}
 
-		// Return true if small amounts of both input and output memory are expected (performance hint)  
+		// Return true if small amounts of both input and output memory are expected (performance hint)
 		bool expect_little_data() const
 		{
 			return m_expect_little_data;
@@ -249,6 +246,15 @@ public:
 			return raw_serialize(std::addressof(obj), sizeof(obj));
 		}
 
+		template <typename T>
+		static constexpr usz c_tup_size = std::tuple_size_v<std::conditional_t<TupleAlike<T>, std::remove_cvref_t<T>, std::tuple<>>>;
+
+		template <typename T>
+		static std::remove_cvref_t<T>& as_nonconst(T&& arg) noexcept
+		{
+			return const_cast<std::remove_cvref_t<T>&>(static_cast<const T&>(arg));
+		}
+
 		// std::vector, std::basic_string
 		// Discourage using std::pair/tuple with vectors because it eliminates the possibility of bitwise optimization
 		template <typename T> requires FastRandomAccess<T> && ListAlike<T> && (!TupleAlike<typename T::value_type>)
@@ -327,9 +333,24 @@ public:
 			{
 				for (auto&& value : obj)
 				{
-					if (!serialize(value))
+					if constexpr (c_tup_size<decltype(*std::data(obj))> == 2)
 					{
-						return false;
+						if (!serialize(as_nonconst(std::get<0>(value))))
+						{
+							return false;
+						}
+
+						if (!serialize(as_nonconst(std::get<1>(value))))
+						{
+							return false;
+						}
+					}
+					else
+					{
+						if (!serialize(value))
+						{
+							return false;
+						}
 					}
 				}
 
@@ -347,9 +368,24 @@ public:
 
 				for (auto&& value : obj)
 				{
-					if (!serialize(value))
+					if constexpr (c_tup_size<decltype(value)> == 2)
 					{
-						return false;
+						if (!serialize(as_nonconst(std::get<0>(value))))
+						{
+							return false;
+						}
+
+						if (!serialize(as_nonconst(std::get<1>(value))))
+						{
+							return false;
+						}
+					}
+					else
+					{
+						if (!serialize(value))
+						{
+							return false;
+						}
 					}
 				}
 
@@ -388,7 +424,8 @@ public:
 			return true;
 		}
 
-		template <typename T> requires requires (T& obj) { (obj.*(&T::operator()))(std::declval<stx::exact_t<utils::serial&>>()); }
+		template <typename T>
+			requires requires(T& obj, utils::serial& ar) { (obj.*(&T::operator()))(stx::exact_t<utils::serial&>(ar)); }
 		bool serialize(T& obj)
 		{
 			obj(*this);
@@ -412,7 +449,7 @@ public:
 		}
 
 		// std::pair, std::tuple
-		template <typename T> requires TupleAlike<T> && (!FastRandomAccess<T>)
+		template <typename T> requires TupleAlike<T>
 		bool serialize(T& obj)
 		{
 			return serialize_tuple(obj);
@@ -423,7 +460,7 @@ public:
 		bool operator()(Args&&... args) noexcept
 		{
 			return ((AUDIT(!std::is_const_v<std::remove_reference_t<Args>> || is_writing())
-				, serialize(const_cast<std::remove_cvref_t<Args>&>(static_cast<const Args&>(args)))), ...);
+				, serialize(as_nonconst(args))), ...);
 		}
 
 		// Code style utility, for when utils::serial is a pointer for example
@@ -519,30 +556,48 @@ public:
 			AUDIT(!is_writing());
 
 			using type = std::remove_const_t<T>;
+			using not_tuple_t = std::conditional_t<TupleAlike<T>, char, type>;
 
 			if constexpr (Bitcopy<T>)
 			{
-				u8 buf[sizeof(type)]{};
+				u8 buf[sizeof(not_tuple_t)]{};
 				ensure(raw_serialize(buf, sizeof(buf)));
-				return std::bit_cast<type>(buf);
-			}
-			else if constexpr (std::is_constructible_v<type, stx::exact_t<serial&>>)
-			{
-				return type(stx::exact_t<serial&>(*this));
-			}
-			else if constexpr (std::is_constructible_v<type>)
-			{
-				type value{};
-				ensure(serialize(value));
-				return value;
+				return std::bit_cast<not_tuple_t>(buf);
 			}
 			else if constexpr (TupleAlike<T>)
 			{
-				static_assert(std::tuple_size_v<type> == 2, "Unimplemented tuple serialization!");
+				constexpr int tup_size = c_tup_size<type>;
 
-				auto first = operator std::remove_cvref_t<decltype(std::get<0>(std::declval<type&>()))>();
-				return type{ std::move(first)
-					, operator std::remove_cvref_t<decltype(std::get<1>(std::declval<type&>()))> };
+				static_assert(tup_size == 2 || tup_size == 4, "Unimplemented tuple serialization!");
+
+				using first_t  = typename std::tuple_element<std::min(0, tup_size - 1), type>::type;
+				using second_t = typename std::tuple_element<std::min(1, tup_size - 1), type>::type;
+				using third_t  = typename std::tuple_element<std::min(2, tup_size - 1), type>::type;
+				using fourth_t = typename std::tuple_element<std::min(3, tup_size - 1), type>::type;
+
+				first_t first = this->operator first_t();
+
+				if constexpr (tup_size == 4)
+				{
+					second_t second = this->operator second_t();
+					third_t third = this->operator third_t();
+
+					return type{ std::move(first), std::move(second), std::move(third), this->operator fourth_t() };
+				}
+				else
+				{
+					return type{ std::move(first), this->operator second_t() };
+				}
+			}
+			else if constexpr (std::is_constructible_v<type, stx::exact_t<serial&>>)
+			{
+				return not_tuple_t(stx::exact_t<serial&>(*this));
+			}
+			else if constexpr (std::is_constructible_v<type>)
+			{
+				not_tuple_t value{};
+				ensure(serialize(value));
+				return value;
 			}
 		}
 

@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "Emu/System.h"
 #include "Emu/system_config.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Utilities/StrUtil.h"
@@ -9,10 +8,15 @@
 #include <Emu/Cell/lv2/sys_event.h>
 
 #include <numeric>
+#include <cmath>
+
+#ifndef WITHOUT_OPENAL
+#include "3rdparty/OpenAL/openal-soft/include/AL/alext.h"
+#endif
 
 LOG_CHANNEL(cellMic);
 
-template<>
+template <>
 void fmt_class_string<CellMicInError>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](auto error)
@@ -41,7 +45,7 @@ void fmt_class_string<CellMicInError>::format(std::string& out, u64 arg)
 	});
 }
 
-template<>
+template <>
 void fmt_class_string<CellMicInErrorDsp>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](auto error)
@@ -68,6 +72,22 @@ void fmt_class_string<CellMicInErrorDsp>::format(std::string& out, u64 arg)
 
 		return unknown;
 	});
+}
+
+namespace fmt
+{
+	struct alc_error
+	{
+		ALCdevice* device{};
+		ALCenum error{};
+	};
+}
+
+template <>
+void fmt_class_string<fmt::alc_error>::format(std::string& out, u64 arg)
+{
+	const fmt::alc_error& obj = get_object(arg);
+	fmt::append(out, "0x%x='%s'", obj.error, alcGetString(obj.device, obj.error));
 }
 
 void mic_context::operator()()
@@ -238,7 +258,6 @@ bool mic_context::check_device(u32 dev_num)
 	return device.is_registered();
 }
 
-
 // Static functions
 
 template <u32 bytesize>
@@ -301,6 +320,9 @@ error_code microphone_device::open_microphone(const u8 type, const u32 dsp_r, co
 	dsp_samplingrate = dsp_r;
 	raw_samplingrate = raw_r;
 	num_channels     = channels;
+
+#ifndef WITHOUT_OPENAL
+	enumerate_devices();
 
 	// Adjust number of channels depending on microphone type
 	switch (device_type)
@@ -403,36 +425,40 @@ error_code microphone_device::open_microphone(const u8 type, const u32 dsp_r, co
 		break;
 	}
 
+	ALCdevice* device = nullptr;
+
 	// Make sure we use a proper sampling rate
-	const auto fixup_samplingrate = [this](u32& rate) -> bool
+	// TODO: The used sample rate may vary for Sony's camera devices
+	const std::array<u32, 7> samplingrates = { raw_samplingrate, 48000u, 32000u, 24000u, 16000u, 12000u, 8000u };
+
+	for (u32 samplingrate : samplingrates)
 	{
-		// TODO: The used sample rate may vary for Sony's camera devices
-		const std::array<u32, 7> samplingrates = { rate, 48000u, 32000u, 24000u, 16000u, 12000u, 8000u };
-
-		const auto test_samplingrate = [&samplingrates](const u32& rate)
+		if (!std::any_of(samplingrates.cbegin() + 1, samplingrates.cend(), [samplingrate](u32 r){ return r == samplingrate; }))
 		{
-			// TODO: actually check if device supports sampling rates
-			return std::any_of(samplingrates.cbegin() + 1, samplingrates.cend(), [&rate](const u32& r){ return r == rate; });
-		};
-
-		for (u32 samplingrate : samplingrates)
-		{
-			if (test_samplingrate(samplingrate))
-			{
-				// Use this sampling rate
-				raw_samplingrate = samplingrate;
-				cellMic.notice("Using sampling rate %d.", samplingrate);
-				return true;
-			}
-
 			cellMic.warning("Requested sampling rate %d, but we do not support it. Trying next sampling rate...", samplingrate);
+			continue;
 		}
 
-		return false;
-	};
+		cellMic.notice("Trying sampling rate %d with %d channel(s)", samplingrate, num_channels);
 
-	if (!fixup_samplingrate(raw_samplingrate))
+		device = open_device(devices[0].name, samplingrate, num_al_channels, inbuf_size);
+		if (!device)
+		{
+			continue;
+		}
+
+		// Use this sampling rate
+		raw_samplingrate = samplingrate;
+		cellMic.notice("Using sampling rate %d and %d channel(s)", raw_samplingrate, num_channels);
+		break;
+	}
+
+	if (!device)
 	{
+		cellMic.error("Failed to open capture device '%s' (raw_samplingrate=%d, num_al_channels=0x%x, inbuf_size=%d)", devices[0].name, raw_samplingrate, num_al_channels, inbuf_size);
+#ifdef _WIN32
+		cellMic.error("Make sure microphone use is authorized under \"Microphone privacy settings\" in windows configuration");
+#endif
 		return CELL_MICIN_ERROR_DEVICE_NOT_SUPPORT;
 	}
 
@@ -440,29 +466,19 @@ error_code microphone_device::open_microphone(const u8 type, const u32 dsp_r, co
 
 	ensure(!devices.empty());
 
-	ALCdevice* device = alcCaptureOpenDevice(devices[0].name.c_str(), raw_samplingrate, num_al_channels, inbuf_size);
-
-	if (ALCenum err = alcGetError(device); err != ALC_NO_ERROR || !device)
-	{
-		cellMic.error("Error opening capture device %s (error=0x%x, device=*0x%x)", devices[0].name, err, device);
-#ifdef _WIN32
-		cellMic.error("Make sure microphone use is authorized under \"Microphone privacy settings\" in windows configuration");
-#endif
-		return CELL_MICIN_ERROR_DEVICE_NOT_SUPPORT;
-	}
-
 	devices[0].device = device;
 	devices[0].buf.resize(inbuf_size, 0);
 
 	if (device_type == microphone_handler::singstar && devices.size() >= 2)
 	{
 		// Open a 2nd microphone into the same device
-		device = alcCaptureOpenDevice(devices[1].name.c_str(), raw_samplingrate, AL_FORMAT_MONO16, inbuf_size);
+		num_al_channels = AL_FORMAT_MONO16;
+		device = open_device(devices[1].name, raw_samplingrate, num_al_channels, inbuf_size);
 
-		if (ALCenum err = alcGetError(device); err != ALC_NO_ERROR || !device)
+		if (!device)
 		{
 			// Ignore it and move on
-			cellMic.error("Error opening 2nd SingStar capture device %s (error=0x%x, device=*0x%x)", devices[1].name, err, device);
+			cellMic.error("Failed to open 2nd SingStar capture device '%s' (raw_samplingrate=%d, num_al_channels=0x%x, inbuf_size=%d)", devices[1].name, raw_samplingrate, num_al_channels, inbuf_size);
 		}
 		else
 		{
@@ -480,10 +496,14 @@ error_code microphone_device::open_microphone(const u8 type, const u32 dsp_r, co
 
 	mic_opened = true;
 	return CELL_OK;
+#else
+	return CELL_MICIN_ERROR_DEVICE_NOT_SUPPORT;
+#endif
 }
 
 error_code microphone_device::close_microphone()
 {
+#ifndef WITHOUT_OPENAL
 	if (mic_started)
 	{
 		stop_microphone();
@@ -493,7 +513,7 @@ error_code microphone_device::close_microphone()
 	{
 		if (alcCaptureCloseDevice(micdevice.device) != ALC_TRUE)
 		{
-			cellMic.error("Error closing capture device %s", micdevice.name);
+			cellMic.error("Error closing capture device '%s'", micdevice.name);
 		}
 
 		micdevice.device = nullptr;
@@ -502,41 +522,44 @@ error_code microphone_device::close_microphone()
 
 	temp_buf.clear();
 	mic_opened = false;
+#endif
 
 	return CELL_OK;
 }
 
 error_code microphone_device::start_microphone()
 {
+#ifndef WITHOUT_OPENAL
 	for (const mic_device& micdevice : devices)
 	{
 		alcCaptureStart(micdevice.device);
 		if (ALCenum err = alcGetError(micdevice.device); err != ALC_NO_ERROR)
 		{
-			cellMic.error("Error starting capture of device %s (error=0x%x)", micdevice.name, err);
+			cellMic.error("Error starting capture of device '%s' (error=%s)", micdevice.name, fmt::alc_error{micdevice.device, err});
 			stop_microphone();
 			return CELL_MICIN_ERROR_FATAL;
 		}
 	}
+#endif
 
 	mic_started = true;
-
 	return CELL_OK;
 }
 
 error_code microphone_device::stop_microphone()
 {
+#ifndef WITHOUT_OPENAL
 	for (const mic_device& micdevice : devices)
 	{
 		alcCaptureStop(micdevice.device);
 		if (ALCenum err = alcGetError(micdevice.device); err != ALC_NO_ERROR)
 		{
-			cellMic.error("Error stopping capture of device %s (error=0x%x)", micdevice.name, err);
+			cellMic.error("Error stopping capture of device '%s' (error=%s)", micdevice.name, fmt::alc_error{micdevice.device, err});
 		}
 	}
+#endif
 
 	mic_started = false;
-
 	return CELL_OK;
 }
 
@@ -574,8 +597,31 @@ bool microphone_device::has_data() const
 	return mic_registered && mic_opened && mic_started && (rbuf_raw.has_data() || rbuf_dsp.has_data());
 }
 
+f32 microphone_device::calculate_energy_level()
+{
+	const auto& buffer = device_type == microphone_handler::real_singstar ? ::at32(devices, 0).buf : temp_buf;
+	const size_t num_samples = buffer.size() / sizeof(s16);
+
+	f64 sum_squares = 0.0;
+
+	for (usz i = 0; i < num_samples; i++)
+	{
+		const be_t<s16> sample = read_from_ptr<be_t<s16>>(buffer, i * sizeof(s16));
+		const f64 normalized_sample = static_cast<f64>(sample) / -std::numeric_limits<s16>::min();
+		sum_squares += normalized_sample * normalized_sample;
+	}
+
+	const f32 rms = num_samples > 0 ? static_cast<f32>(std::sqrt(sum_squares / num_samples)) : 0.0f;
+	constexpr f32 decibels_max = 90.0f;
+	const f32 decibels_relative = 20.0f * std::log10(std::max(rms, 0.00001f));
+	const f32 decibels = decibels_max + (decibels_relative * 0.5f);
+
+	return std::clamp(decibels, 40.0f, decibels_max);
+}
+
 u32 microphone_device::capture_audio()
 {
+#ifndef WITHOUT_OPENAL
 	ensure(sample_size > 0);
 
 	u32 num_samples = inbuf_size / sample_size;
@@ -587,7 +633,7 @@ u32 microphone_device::capture_audio()
 
 		if (ALCenum err = alcGetError(micdevice.device); err != ALC_NO_ERROR)
 		{
-			cellMic.error("Error getting number of captured samples of device %s (error=0x%x)", micdevice.name, err);
+			cellMic.error("Error getting number of captured samples of device '%s' (error=%s)", micdevice.name, fmt::alc_error{micdevice.device, err});
 			return CELL_MICIN_ERROR_FATAL;
 		}
 
@@ -605,14 +651,67 @@ u32 microphone_device::capture_audio()
 
 		if (ALCenum err = alcGetError(micdevice.device); err != ALC_NO_ERROR)
 		{
-			cellMic.error("Error capturing samples of device %s (error=0x%x)", micdevice.name, err);
+			cellMic.error("Error capturing samples of device '%s' (error=%s)", micdevice.name, fmt::alc_error{micdevice.device, err});
 		}
 	}
 
 	return num_samples;
+#else
+	return 0;
+#endif
 }
 
 // Private functions
+
+#ifndef WITHOUT_OPENAL
+void microphone_device::enumerate_devices()
+{
+	cellMic.notice("Enumerating capture devices...");
+	enumerated_devices.clear();
+
+	if (alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT") == AL_TRUE)
+	{
+		if (const char* alc_devices = alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER))
+		{
+			while (alc_devices && *alc_devices != 0)
+			{
+				cellMic.notice("Found capture device: '%s'", alc_devices);
+				enumerated_devices.push_back(alc_devices);
+				alc_devices += strlen(alc_devices) + 1;
+			}
+		}
+	}
+	else
+	{
+		// Without enumeration we can only use one device
+		cellMic.error("OpenAl extension ALC_ENUMERATION_EXT not supported. The enumerated capture devices will only contain the default capture device.");
+
+		if (const char* alc_device = alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER))
+		{
+			cellMic.notice("Found default capture device: '%s'", alc_device);
+			enumerated_devices.push_back(alc_device);
+		}
+	}
+}
+
+ALCdevice* microphone_device::open_device(const std::string& name, u32 samplingrate, ALCenum num_al_channels, u32 buf_size)
+{
+	if (std::none_of(enumerated_devices.cbegin(), enumerated_devices.cend(), [&name](const std::string& dev){ return dev == name; }))
+	{
+		cellMic.error("Capture device '%s' not in enumerated devices", name);
+	}
+
+	ALCdevice* device = alcCaptureOpenDevice(name.c_str(), samplingrate, num_al_channels, buf_size);
+
+	if (ALCenum err = alcGetError(device); err != ALC_NO_ERROR || !device)
+	{
+		cellMic.warning("Failed to open capture device '%s' (error=%s, device=*0x%x, samplingrate=%d, num_al_channels=0x%x, buf_size=%d)", name, fmt::alc_error{device, err}, device, samplingrate, num_al_channels, buf_size);
+		device = nullptr;
+	}
+
+	return device;
+}
+#endif
 
 void microphone_device::get_data(const u32 num_samples)
 {
@@ -1088,7 +1187,7 @@ error_code cellMicGetSignalState(s32 dev_num, CellMicSignalState sig_state, vm::
 		*fval = 1.0f; // No gain applied
 		break;
 	case CELLMIC_SIGSTATE_MICENG:
-		*fval = 40.0f; // 40 decibels
+		*fval = device.calculate_energy_level();
 		break;
 	case CELLMIC_SIGSTATE_SPKENG:
 		*fval = 10.0f; // 10 decibels

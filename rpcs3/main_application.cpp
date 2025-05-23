@@ -73,14 +73,7 @@ void main_application::OnEmuSettingsChange()
 {
 	if (Emu.IsRunning())
 	{
-		if (g_cfg.misc.prevent_display_sleep)
-		{
-			disable_display_sleep();
-		}
-		else
-		{
-			enable_display_sleep();
-		}
+		enable_display_sleep(!g_cfg.misc.prevent_display_sleep);
 	}
 
 	if (!Emu.IsStopped())
@@ -133,7 +126,7 @@ EmuCallbacks main_application::CreateCallbacks()
 			basic_keyboard_handler* ret = g_fxo->init<KeyboardHandlerBase, basic_keyboard_handler>(Emu.DeserialManager());
 			ensure(ret);
 			ret->moveToThread(get_thread());
-			ret->SetTargetWindow(m_game_window);
+			ret->SetTargetWindow(reinterpret_cast<QWindow*>(m_game_window));
 			break;
 		}
 		}
@@ -170,7 +163,7 @@ EmuCallbacks main_application::CreateCallbacks()
 			basic_mouse_handler* ret = g_fxo->init<MouseHandlerBase, basic_mouse_handler>(Emu.DeserialManager());
 			ensure(ret);
 			ret->moveToThread(get_thread());
-			ret->SetTargetWindow(m_game_window);
+			ret->SetTargetWindow(reinterpret_cast<QWindow*>(m_game_window));
 			break;
 		}
 		case mouse_handler::raw:

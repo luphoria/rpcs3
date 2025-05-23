@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 
 #include "cheat_manager.h"
+#include "memory_viewer_panel.h"
 
 #include "Emu/System.h"
 #include "Emu/Memory/vm.h"
@@ -14,11 +15,12 @@
 
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUAnalyser.h"
-#include "Emu/Cell/PPUFunction.h"
+#include "Emu/Cell/PPUInterpreter.h"
 #include "Emu/Cell/lv2/sys_sync.h"
 
 #include "util/yaml.hpp"
 #include "util/asm.hpp"
+#include "util/logs.hpp"
 #include "util/to_endian.hpp"
 #include "Utilities/File.h"
 #include "Utilities/StrUtil.h"
@@ -27,28 +29,6 @@
 LOG_CHANNEL(log_cheat, "Cheat");
 
 cheat_manager_dialog* cheat_manager_dialog::inst = nullptr;
-
-template <>
-void fmt_class_string<cheat_type>::format(std::string& out, u64 arg)
-{
-	format_enum(out, arg, [](cheat_type value)
-	{
-		switch (value)
-		{
-		case cheat_type::unsigned_8_cheat: return "Unsigned 8 bits";
-		case cheat_type::unsigned_16_cheat: return "Unsigned 16 bits";
-		case cheat_type::unsigned_32_cheat: return "Unsigned 32 bits";
-		case cheat_type::unsigned_64_cheat: return "Unsigned 64 bits";
-		case cheat_type::signed_8_cheat: return "Signed 8 bits";
-		case cheat_type::signed_16_cheat: return "Signed 16 bits";
-		case cheat_type::signed_32_cheat: return "Signed 32 bits";
-		case cheat_type::signed_64_cheat: return "Signed 64 bits";
-		case cheat_type::max: break;
-		}
-
-		return unknown;
-	});
-}
 
 YAML::Emitter& operator<<(YAML::Emitter& out, const cheat_info& rhs)
 {
@@ -612,8 +592,9 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 			return;
 		}
 
-		bool success;
-		u64 result_value;
+		bool success = false;
+		u64 result_value {};
+		f64 result_value_f {};
 
 		switch (cheat->type)
 		{
@@ -625,6 +606,7 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 		case cheat_type::signed_16_cheat: result_value = cheat_engine::get_value<s16>(final_offset, success); break;
 		case cheat_type::signed_32_cheat: result_value = cheat_engine::get_value<s32>(final_offset, success); break;
 		case cheat_type::signed_64_cheat: result_value = cheat_engine::get_value<s64>(final_offset, success); break;
+		case cheat_type::float_32_cheat: result_value_f = cheat_engine::get_value<f32>(final_offset, success); break;
 		default: log_cheat.fatal("Unsupported cheat type"); return;
 		}
 
@@ -632,6 +614,8 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 		{
 			if (cheat->type >= cheat_type::signed_8_cheat && cheat->type <= cheat_type::signed_64_cheat)
 				edt_value_final->setText(tr("%1").arg(static_cast<s64>(result_value)));
+			else if (cheat->type == cheat_type::float_32_cheat)
+				edt_value_final->setText(tr("%1").arg(result_value_f));
 			else
 				edt_value_final->setText(tr("%1").arg(result_value));
 		}
@@ -795,6 +779,7 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 		case cheat_type::signed_16_cheat: results = convert_and_set<s16>(final_offset); break;
 		case cheat_type::signed_32_cheat: results = convert_and_set<s32>(final_offset); break;
 		case cheat_type::signed_64_cheat: results = convert_and_set<s64>(final_offset); break;
+		case cheat_type::float_32_cheat: results = convert_and_set<f32>(final_offset); break;
 		default: log_cheat.fatal("Unsupported cheat type"); return;
 		}
 
@@ -845,6 +830,7 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 		QMenu* menu = new QMenu();
 
 		QAction* add_to_cheat_list = new QAction(tr("Add to cheat list"), menu);
+		QAction* show_in_mem_viewer = new QAction(tr("Show in Memory Viewer"), menu);
 
 		const u32 offset       = offsets_found[current_row];
 		const cheat_type type  = static_cast<cheat_type>(cbx_cheat_search_type->currentIndex());
@@ -865,7 +851,13 @@ cheat_manager_dialog::cheat_manager_dialog(QWidget* parent)
 			update_cheat_list();
 		});
 
+		connect(show_in_mem_viewer, &QAction::triggered, this, [offset]()
+		{
+			memory_viewer_panel::ShowAtPC(offset);
+		});
+
 		menu->addAction(add_to_cheat_list);
+		menu->addAction(show_in_mem_viewer);
 		menu->exec(globalPos);
 	});
 
@@ -888,8 +880,6 @@ cheat_manager_dialog* cheat_manager_dialog::get_dlg(QWidget* parent)
 template <typename T>
 T cheat_manager_dialog::convert_from_QString(const QString& str, bool& success)
 {
-	T result;
-
 	if constexpr (std::is_same_v<T, u8>)
 	{
 		const u16 result_16 = str.toUShort(&success);
@@ -897,17 +887,17 @@ T cheat_manager_dialog::convert_from_QString(const QString& str, bool& success)
 		if (result_16 > 0xFF)
 			success = false;
 
-		result = static_cast<T>(result_16);
+		return static_cast<T>(result_16);
 	}
 
 	if constexpr (std::is_same_v<T, u16>)
-		result = str.toUShort(&success);
+		return str.toUShort(&success);
 
 	if constexpr (std::is_same_v<T, u32>)
-		result = str.toUInt(&success);
+		return str.toUInt(&success);
 
 	if constexpr (std::is_same_v<T, u64>)
-		result = str.toULongLong(&success);
+		return str.toULongLong(&success);
 
 	if constexpr (std::is_same_v<T, s8>)
 	{
@@ -915,28 +905,31 @@ T cheat_manager_dialog::convert_from_QString(const QString& str, bool& success)
 		if (result_16 < -128 || result_16 > 127)
 			success = false;
 
-		result = static_cast<T>(result_16);
+		return static_cast<T>(result_16);
 	}
 
 	if constexpr (std::is_same_v<T, s16>)
-		result = str.toShort(&success);
+		return str.toShort(&success);
 
 	if constexpr (std::is_same_v<T, s32>)
-		result = str.toInt(&success);
+		return str.toInt(&success);
 
 	if constexpr (std::is_same_v<T, s64>)
-		result = str.toLongLong(&success);
+		return str.toLongLong(&success);
 
-	return result;
+	if constexpr (std::is_same_v<T, f32>)
+		return str.toFloat(&success);
+
+	return {};
 }
 
 template <typename T>
 bool cheat_manager_dialog::convert_and_search()
 {
-	bool res_conv;
+	bool res_conv = false;
 	const QString to_search = edt_cheat_search_value->text();
 
-	T value = convert_from_QString<T>(to_search, res_conv);
+	const T value = convert_from_QString<T>(to_search, res_conv);
 
 	if (!res_conv)
 		return false;
@@ -948,10 +941,10 @@ bool cheat_manager_dialog::convert_and_search()
 template <typename T>
 std::pair<bool, bool> cheat_manager_dialog::convert_and_set(u32 offset)
 {
-	bool res_conv;
+	bool res_conv = false;
 	const QString to_set = edt_value_final->text();
 
-	T value = convert_from_QString<T>(to_set, res_conv);
+	const T value = convert_from_QString<T>(to_set, res_conv);
 
 	if (!res_conv)
 		return {false, false};
@@ -974,6 +967,7 @@ void cheat_manager_dialog::do_the_search()
 	case cheat_type::signed_16_cheat: res_conv = convert_and_search<s16>(); break;
 	case cheat_type::signed_32_cheat: res_conv = convert_and_search<s32>(); break;
 	case cheat_type::signed_64_cheat: res_conv = convert_and_search<s64>(); break;
+	case cheat_type::float_32_cheat: res_conv = convert_and_search<f32>(); break;
 	default: log_cheat.fatal("Unsupported cheat type"); break;
 	}
 
@@ -1004,7 +998,7 @@ void cheat_manager_dialog::do_the_search()
 	{
 		for (u32 row = 0; row < size; row++)
 		{
-			lst_search->insertItem(row, tr("0x%0").arg(offsets_found[row], 1, 16).toUpper());
+			lst_search->insertItem(row, QString("0x%0").arg(offsets_found[row], 1, 16).toUpper());
 		}
 	}
 
@@ -1038,7 +1032,7 @@ void cheat_manager_dialog::update_cheat_list()
 				item_type->setFlags(item_type->flags() & ~Qt::ItemIsEditable);
 				tbl_cheats->setItem(row, cheat_table_columns::type, item_type);
 
-				QTableWidgetItem* item_offset = new QTableWidgetItem(tr("0x%1").arg(offset.second.offset, 1, 16).toUpper());
+				QTableWidgetItem* item_offset = new QTableWidgetItem(QString("0x%0").arg(offset.second.offset, 1, 16).toUpper());
 				item_offset->setData(Qt::UserRole, QVariant(offset.second.offset));
 				item_offset->setFlags(item_offset->flags() & ~Qt::ItemIsEditable);
 				tbl_cheats->setItem(row, cheat_table_columns::offset, item_offset);
@@ -1065,6 +1059,7 @@ QString cheat_manager_dialog::get_localized_cheat_type(cheat_type type)
 	case cheat_type::signed_16_cheat: return tr("Signed 16 bits");
 	case cheat_type::signed_32_cheat: return tr("Signed 32 bits");
 	case cheat_type::signed_64_cheat: return tr("Signed 64 bits");
+	case cheat_type::float_32_cheat: return tr("Float 32 bits");
 	case cheat_type::max: break;
 	}
 	std::string type_formatted;

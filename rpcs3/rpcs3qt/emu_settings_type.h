@@ -51,6 +51,8 @@ enum class emu_settings_type
 	AccuratePPUFPCC,
 	MaxPreemptCount,
 	SPUProfiler,
+	DisableSpinOptimization,
+	EnabledSPUEventsBusyLoop,
 
 	// Graphics
 	Renderer,
@@ -178,10 +180,10 @@ enum class emu_settings_type
 	UseNativeInterface,
 	ShowShaderCompilationHint,
 	ShowPPUCompilationHint,
+	ShowAutosaveAutoloadHint,
 	ShowPressureIntensityToggleHint,
 	ShowAnalogLimiterToggleHint,
 	ShowMouseAndKeyboardToggleHint,
-	ShowAutosaveAutoloadHint,
 	WindowTitleFormat,
 	PauseDuringHomeMenu,
 
@@ -248,6 +250,8 @@ inline static const std::map<emu_settings_type, cfg_location> settings_location 
 	{ emu_settings_type::AccuratePPUFPCC,          { "Core", "PPU Set FPCC Bits"}},
 	{ emu_settings_type::MaxPreemptCount,          { "Core", "Max CPU Preempt Count"}},
 	{ emu_settings_type::SPUProfiler,              { "Core", "SPU Profiler"}},
+	{ emu_settings_type::DisableSpinOptimization,  { "Core", "Disable SPU GETLLAR Spin Optimization"}},
+	{ emu_settings_type::EnabledSPUEventsBusyLoop, { "Core", "SPU Reservation Busy Waiting Enabled"}},
 
 	// Graphics Tab
 	{ emu_settings_type::Renderer,                   { "Video", "Renderer"}},
@@ -377,13 +381,13 @@ inline static const std::map<emu_settings_type, cfg_location> settings_location 
 	{ emu_settings_type::UseNativeInterface,              { "Miscellaneous", "Use native user interface"}},
 	{ emu_settings_type::ShowShaderCompilationHint,       { "Miscellaneous", "Show shader compilation hint"}},
 	{ emu_settings_type::ShowPPUCompilationHint,          { "Miscellaneous", "Show PPU compilation hint"}},
+	{ emu_settings_type::ShowAutosaveAutoloadHint,        { "Miscellaneous", "Show autosave/autoload hint"}},
 	{ emu_settings_type::ShowPressureIntensityToggleHint, { "Miscellaneous", "Show pressure intensity toggle hint"}},
 	{ emu_settings_type::ShowAnalogLimiterToggleHint,     { "Miscellaneous", "Show analog limiter toggle hint"}},
 	{ emu_settings_type::ShowMouseAndKeyboardToggleHint,  { "Miscellaneous", "Show mouse and keyboard toggle hint"}},
 	{ emu_settings_type::SilenceAllLogs,                  { "Miscellaneous", "Silence All Logs" }},
 	{ emu_settings_type::WindowTitleFormat,               { "Miscellaneous", "Window Title Format" }},
 	{ emu_settings_type::PauseDuringHomeMenu,             { "Miscellaneous", "Pause Emulation During Home Menu" }},
-	{ emu_settings_type::ShowAutosaveAutoloadHint,        { "Miscellaneous", "Show autosave/autoload hint" }},
 
 	// Networking
 	{ emu_settings_type::InternetStatus, { "Net", "Internet enabled"}},

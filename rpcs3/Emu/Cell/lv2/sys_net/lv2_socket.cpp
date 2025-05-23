@@ -35,7 +35,7 @@ std::size_t lv2_socket::get_queue_size() const
 }
 socket_type lv2_socket::get_socket() const
 {
-	return socket;
+	return native_socket;
 }
 
 #ifdef _WIN32
@@ -178,7 +178,7 @@ void lv2_socket::queue_wake(ppu_thread* ppu)
 
 lv2_socket& lv2_socket::operator=(thread_state s) noexcept
 {
-	if (s == thread_state::finished)
+	if (s == thread_state::destroying_context)
 	{
 		close();
 	}

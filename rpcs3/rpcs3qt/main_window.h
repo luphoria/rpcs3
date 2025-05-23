@@ -1,10 +1,5 @@
 #pragma once
 
-#ifdef HAS_QT_WIN_STUFF
-#include <QWinThumbnailToolBar>
-#include <QWinThumbnailToolButton>
-#endif
-
 #include <QActionGroup>
 #include <QMainWindow>
 #include <QIcon>
@@ -61,17 +56,6 @@ class main_window : public QMainWindow
 	QIcon m_icon_fullscreen_on;
 	QIcon m_icon_fullscreen_off;
 
-#ifdef HAS_QT_WIN_STUFF
-	QIcon m_icon_thumb_play;
-	QIcon m_icon_thumb_pause;
-	QIcon m_icon_thumb_stop;
-	QIcon m_icon_thumb_restart;
-	QWinThumbnailToolBar *m_thumb_bar = nullptr;
-	QWinThumbnailToolButton *m_thumb_playPause = nullptr;
-	QWinThumbnailToolButton *m_thumb_stop = nullptr;
-	QWinThumbnailToolButton *m_thumb_restart = nullptr;
-#endif
-
 	enum class drop_type
 	{
 		drop_error,
@@ -111,7 +95,7 @@ public Q_SLOTS:
 	void OnAddBreakpoint(u32 addr) const;
 
 	void RepaintGui();
-	void RetranslateUI(const QStringList& language_codes, const QString& language);
+	void RetranslateUI(const QStringList& language_codes, const QString& language_code);
 
 private Q_SLOTS:
 	void OnPlayOrPause();
@@ -175,17 +159,22 @@ private:
 	drop_type IsValidFile(const QMimeData& md, QStringList* drop_paths = nullptr);
 	void AddGamesFromDirs(QStringList&& paths);
 
-	QAction* CreateRecentAction(const q_string_pair& entry, const uint& sc_idx);
-	void BootRecentAction(const QAction* act);
-	void AddRecentAction(const q_string_pair& entry);
+	QAction* CreateRecentAction(const q_string_pair& entry, u32 sc_idx, bool is_savestate);
+	void BootRecentAction(const QAction* act, bool is_savestate);
+	void AddRecentAction(const q_string_pair& entry, bool is_savestate);
 
 	void UpdateLanguageActions(const QStringList& language_codes, const QString& language);
 	void UpdateFilterActions();
 
 	static QString GetCurrentTitle();
 
-	q_pair_list m_rg_entries;
-	QList<QAction*> m_recent_game_acts;
+	struct recent_game_wrapper
+	{
+		q_pair_list entries;
+		QList<QAction*> actions;
+	};
+	recent_game_wrapper m_recent_game {};
+	recent_game_wrapper m_recent_save {};
 
 	std::shared_ptr<gui_game_info> m_selected_game;
 

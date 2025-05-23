@@ -3,6 +3,7 @@
 #include "Emu/System.h"
 
 #include <random>
+#include <thread>
 
 #ifdef _MSC_VER
 #pragma warning(push, 0)
@@ -826,10 +827,7 @@ namespace utils
 				}
 			}
 
-			auto& thread = *m_thread;
-			thread = thread_state::aborting;
-			thread();
-
+			// Join thread
 			m_thread.reset();
 		}
 

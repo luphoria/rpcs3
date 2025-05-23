@@ -2,7 +2,6 @@
 #include "VKGSRender.h"
 #include "vkutils/buffer_object.h"
 #include "Emu/RSX/Overlays/overlay_manager.h"
-#include "Emu/RSX/Overlays/overlays.h"
 #include "Emu/RSX/Overlays/overlay_debug_overlay.h"
 #include "Emu/Cell/Modules/cellVideoOut.h"
 
@@ -117,7 +116,9 @@ void VKGSRender::present(vk::frame_context_t *ctx)
 		case VK_SUCCESS:
 			break;
 		case VK_SUBOPTIMAL_KHR:
+#ifndef ANDROID
 			should_reinitialize_swapchain = true;
+#endif
 			break;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 			swapchain_unavailable = true;
@@ -154,17 +155,7 @@ void VKGSRender::advance_queued_frames()
 	vk::remove_unused_framebuffers();
 
 	m_vertex_cache->purge();
-	m_current_frame->tag_frame_end(m_attrib_ring_info.get_current_put_pos_minus_one(),
-		m_vertex_env_ring_info.get_current_put_pos_minus_one(),
-		m_fragment_env_ring_info.get_current_put_pos_minus_one(),
-		m_vertex_layout_ring_info.get_current_put_pos_minus_one(),
-		m_fragment_texture_params_ring_info.get_current_put_pos_minus_one(),
-		m_fragment_constants_ring_info.get_current_put_pos_minus_one(),
-		m_transform_constants_ring_info.get_current_put_pos_minus_one(),
-		m_index_buffer_ring_info.get_current_put_pos_minus_one(),
-		m_texture_upload_buffer_ring_info.get_current_put_pos_minus_one(),
-		m_raster_env_ring_info.get_current_put_pos_minus_one(),
-		m_instancing_buffer_ring_info.get_current_put_pos_minus_one());
+	m_current_frame->tag_frame_end();
 
 	m_queued_frames.push_back(m_current_frame);
 	ensure(m_queued_frames.size() <= VK_MAX_ASYNC_FRAMES);
@@ -218,7 +209,6 @@ void VKGSRender::frame_context_cleanup(vk::frame_context_t *ctx)
 	}
 
 	// Resource cleanup.
-	// TODO: This is some outdated crap.
 	{
 		if (m_overlay_manager && m_overlay_manager->has_dirty())
 		{
@@ -242,45 +232,12 @@ void VKGSRender::frame_context_cleanup(vk::frame_context_t *ctx)
 
 		vk::reset_global_resources();
 
-		ctx->buffer_views_to_clean.clear();
-
-		const auto shadermode = g_cfg.video.shadermode.get();
-
-		if (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only)
-		{
-			// TODO: This is jank AF
-			m_vertex_instructions_buffer.reset_allocation_stats();
-			m_fragment_instructions_buffer.reset_allocation_stats();
-		}
-
 		if (ctx->last_frame_sync_time > m_last_heap_sync_time)
 		{
 			m_last_heap_sync_time = ctx->last_frame_sync_time;
 
 			// Heap cleanup; deallocates memory consumed by the frame if it is still held
-			m_attrib_ring_info.m_get_pos = ctx->attrib_heap_ptr;
-			m_vertex_env_ring_info.m_get_pos = ctx->vtx_env_heap_ptr;
-			m_fragment_env_ring_info.m_get_pos = ctx->frag_env_heap_ptr;
-			m_fragment_constants_ring_info.m_get_pos = ctx->frag_const_heap_ptr;
-			m_transform_constants_ring_info.m_get_pos = ctx->vtx_const_heap_ptr;
-			m_vertex_layout_ring_info.m_get_pos = ctx->vtx_layout_heap_ptr;
-			m_fragment_texture_params_ring_info.m_get_pos = ctx->frag_texparam_heap_ptr;
-			m_index_buffer_ring_info.m_get_pos = ctx->index_heap_ptr;
-			m_texture_upload_buffer_ring_info.m_get_pos = ctx->texture_upload_heap_ptr;
-			m_raster_env_ring_info.m_get_pos = ctx->rasterizer_env_heap_ptr;
-			m_instancing_buffer_ring_info.m_get_pos = ctx->instancing_heap_ptr;
-
-			m_attrib_ring_info.notify();
-			m_vertex_env_ring_info.notify();
-			m_fragment_env_ring_info.notify();
-			m_fragment_constants_ring_info.notify();
-			m_transform_constants_ring_info.notify();
-			m_vertex_layout_ring_info.notify();
-			m_fragment_texture_params_ring_info.notify();
-			m_index_buffer_ring_info.notify();
-			m_texture_upload_buffer_ring_info.notify();
-			m_raster_env_ring_info.notify();
-			m_instancing_buffer_ring_info.notify();
+			vk::data_heap_manager::restore_snapshot(ctx->heap_snapshot);
 		}
 	}
 
@@ -449,7 +406,6 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 		}
 
 		// Swap aux storage and current frame; aux storage should always be ready for use at all times
-		m_current_frame->swap_storage(m_aux_frame_context);
 		m_current_frame->grab_resources(m_aux_frame_context);
 	}
 	else if (m_current_frame->swap_command_buffer)
@@ -767,7 +723,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	}
 
 	const bool has_overlay = (m_overlay_manager && m_overlay_manager->has_visible());
-	if (g_cfg.video.overlay || has_overlay)
+	if (g_cfg.video.debug_overlay || has_overlay)
 	{
 		if (target_layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 		{
@@ -810,7 +766,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			}
 		}
 
-		if (g_cfg.video.overlay)
+		if (g_cfg.video.debug_overlay)
 		{
 			const auto num_dirty_textures = m_texture_cache.get_unreleased_textures_count();
 			const auto texture_memory_size = m_texture_cache.get_texture_memory_in_use() / (1024 * 1024);
@@ -829,8 +785,14 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			const auto vertex_cache_hit_ratio = info.stats.vertex_cache_request_count
 				? (vertex_cache_hit_count * 100) / info.stats.vertex_cache_request_count
 				: 0;
+			const auto program_cache_lookups = info.stats.program_cache_lookups_total;
+			const auto program_cache_ellided = info.stats.program_cache_lookups_ellided;
+			const auto program_cache_ellision_rate = program_cache_lookups
+				? (program_cache_ellided * 100) / program_cache_lookups
+				: 0;
 
 			rsx::overlays::set_debug_overlay_text(fmt::format(
+				"Internal Resolution:      %s\n"
 				"RSX Load:                 %3d%%\n"
 				"draw calls: %17d\n"
 				"submits: %20d\n"
@@ -844,13 +806,16 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 				"Temporary texture memory: %3dM\n"
 				"Flush requests: %13d  = %2d (%3d%%) hard faults, %2d unavoidable, %2d misprediction(s), %2d speculation(s)\n"
 				"Texture uploads: %12u (%u from CPU - %02u%%, %u copies avoided)\n"
-				"Vertex cache hits: %10u/%u (%u%%)",
+				"Vertex cache hits: %10u/%u (%u%%)\n"
+				"Program cache lookup ellision: %u/%u (%u%%)",
+				info.stats.framebuffer_stats.to_string(!backend_config.supports_hw_msaa),
 				get_load(), info.stats.draw_calls, info.stats.submit_count, info.stats.setup_time, info.stats.vertex_upload_time,
 				info.stats.textures_upload_time, info.stats.draw_exec_time, info.stats.flip_time,
 				num_dirty_textures, texture_memory_size, tmp_texture_memory_size,
 				num_flushes, num_misses, cache_miss_ratio, num_unavoidable, num_mispredict, num_speculate,
 				num_texture_upload, num_texture_upload_miss, texture_upload_miss_ratio, texture_copies_ellided,
-				vertex_cache_hit_count, info.stats.vertex_cache_request_count, vertex_cache_hit_ratio)
+				vertex_cache_hit_count, info.stats.vertex_cache_request_count, vertex_cache_hit_ratio,
+				program_cache_ellided, program_cache_lookups, program_cache_ellision_rate)
 			);
 		}
 

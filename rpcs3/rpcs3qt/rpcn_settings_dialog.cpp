@@ -7,14 +7,14 @@
 #include <QGroupBox>
 #include <QMenu>
 #include <QDialogButtonBox>
-
-#include <thread>
+#include <QCheckBox>
 
 #include "qt_utils.h"
 
 #include "rpcn_settings_dialog.h"
 #include "Emu/System.h"
 #include "Emu/NP/rpcn_config.h"
+#include "Emu/NP/ip_address.h"
 
 #include <wolfssl/ssl.h>
 #include <wolfssl/openssl/evp.h>
@@ -162,6 +162,9 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 	QPushButton* btn_test     = new QPushButton(tr("Test Account"));
 	QLabel* label_npid        = new QLabel();
 
+	QCheckBox* checkbox_disable_ipv6 = new QCheckBox(tr("Disable IPv6"));
+	checkbox_disable_ipv6->setCheckState(g_cfg_rpcn.get_ipv6_support() ? Qt::Unchecked : Qt::Checked);
+
 	const auto update_npid_label = [label_npid]()
 	{
 		const std::string npid = g_cfg_rpcn.get_npid();
@@ -180,6 +183,7 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 	grp_buttons->setLayout(vbox_buttons);
 
 	vbox_global->addWidget(grp_buttons);
+	vbox_global->addWidget(checkbox_disable_ipv6);
 
 	setLayout(vbox_global);
 
@@ -195,6 +199,9 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 
 			g_cfg_rpcn.set_host(host.toString().toStdString());
 			g_cfg_rpcn.save();
+
+			// Resets the ipv6 support as it depends on availability of the feature on the server
+			np::is_ipv6_supported(np::IPV6_SUPPORT::IPV6_UNKNOWN);
 		});
 
 	connect(btn_add_server, &QAbstractButton::clicked, this, [this]()
@@ -263,7 +270,7 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 				return;
 
 			{
-				const auto rpcn       = rpcn::rpcn_client::get_instance();
+				const auto rpcn = rpcn::rpcn_client::get_instance(0);
 				const auto avatar_url = "https://rpcs3.net/cdn/netplay/DefaultAvatar.png";
 
 				if (auto result = rpcn->wait_for_connection(); result != rpcn::rpcn_state::failure_no_failure)
@@ -318,7 +325,7 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 
 	connect(btn_test, &QAbstractButton::clicked, this, [this]()
 		{
-			auto rpcn = rpcn::rpcn_client::get_instance();
+			auto rpcn = rpcn::rpcn_client::get_instance(0);
 
 			if (auto res = rpcn->wait_for_connection(); res != rpcn::rpcn_state::failure_no_failure)
 			{
@@ -335,6 +342,12 @@ rpcn_account_dialog::rpcn_account_dialog(QWidget* parent)
 
 			QMessageBox::information(this, tr("RPCN Account Valid!"), tr("Your account is valid!"), QMessageBox::Ok);
 		});
+
+	connect(checkbox_disable_ipv6, &QCheckBox::checkStateChanged, this, [this](Qt::CheckState state)
+	{
+		g_cfg_rpcn.set_ipv6_support(state == Qt::Unchecked);
+		g_cfg_rpcn.save();
+	});
 }
 
 void rpcn_account_dialog::refresh_combobox()
@@ -748,7 +761,7 @@ void rpcn_account_edit_dialog::resend_token()
 	if (!save_config())
 		return;
 
-	const auto rpcn = rpcn::rpcn_client::get_instance();
+	const auto rpcn = rpcn::rpcn_client::get_instance(0);
 
 	const std::string npid     = g_cfg_rpcn.get_npid();
 	const std::string password = g_cfg_rpcn.get_password();
@@ -801,7 +814,7 @@ void rpcn_account_edit_dialog::change_password()
 			return;
 
 		{
-			const auto rpcn = rpcn::rpcn_client::get_instance();
+			const auto rpcn = rpcn::rpcn_client::get_instance(0);
 			if (auto result = rpcn->wait_for_connection(); result != rpcn::rpcn_state::failure_no_failure)
 			{
 				const QString error_message = tr("Failed to connect to RPCN server:\n%0").arg(QString::fromStdString(rpcn::rpcn_state_to_string(result)));
@@ -846,7 +859,7 @@ void rpcn_account_edit_dialog::change_password()
 			return;
 
 		{
-			const auto rpcn = rpcn::rpcn_client::get_instance();
+			const auto rpcn = rpcn::rpcn_client::get_instance(0);
 			if (auto result = rpcn->wait_for_connection(); result != rpcn::rpcn_state::failure_no_failure)
 			{
 				const QString error_message = tr("Failed to connect to RPCN server:\n%0").arg(QString::fromStdString(rpcn::rpcn_state_to_string(result)));
@@ -870,6 +883,8 @@ void rpcn_account_edit_dialog::change_password()
 				return;
 			}
 
+			g_cfg_rpcn.set_password(*password);
+			g_cfg_rpcn.save();
 			QMessageBox::information(this, tr("Password Successfully Changed!"), tr("Your password has been successfully changed!"), QMessageBox::Ok);
 		}
 		break;
@@ -1033,7 +1048,7 @@ rpcn_friends_dialog::rpcn_friends_dialog(QWidget* parent)
 	setLayout(vbox_global);
 
 	// Tries to connect to RPCN
-	m_rpcn = rpcn::rpcn_client::get_instance();
+	m_rpcn = rpcn::rpcn_client::get_instance(0);
 
 	if (auto res = m_rpcn->wait_for_connection(); res != rpcn::rpcn_state::failure_no_failure)
 	{

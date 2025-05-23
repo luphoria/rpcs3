@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Emu/Io/MouseHandler.h"
-
 #include <QButtonGroup>
 #include <QPushButton>
 #include <QDialog>
@@ -39,6 +37,7 @@ private:
 	QTimer m_remap_timer;
 
 protected:
+	void keyPressEvent(QKeyEvent* event) override;
 	void mouseReleaseEvent(QMouseEvent* event) override;
 	bool eventFilter(QObject* object, QEvent* event) override;
 };

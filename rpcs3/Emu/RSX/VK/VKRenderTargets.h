@@ -7,12 +7,9 @@
 #include "VKHelpers.h"
 #include "vkutils/barriers.h"
 #include "vkutils/buffer_object.h"
-#include "vkutils/data_heap.h"
 #include "vkutils/device.h"
 #include "vkutils/image.h"
 #include "vkutils/scratch.h"
-
-#include <span>
 
 namespace vk
 {
@@ -190,6 +187,8 @@ namespace vk
 			case driver_vendor::LAVAPIPE:
 			case driver_vendor::V3DV:
 			case driver_vendor::HONEYKRISP:
+			case driver_vendor::PANVK:
+			case driver_vendor::ARM_MALI:
 				break;
 			}
 
@@ -684,4 +683,3 @@ namespace vk
 		void trim(vk::command_buffer& cmd, rsx::problem_severity memory_pressure);
 	};
 }
-//h

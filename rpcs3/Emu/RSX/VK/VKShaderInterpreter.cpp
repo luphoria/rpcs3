@@ -1,16 +1,18 @@
 #include "stdafx.h"
+
 #include "VKShaderInterpreter.h"
+#include "VKCommonPipelineLayout.h"
 #include "VKVertexProgram.h"
 #include "VKFragmentProgram.h"
-#include "VKGSRender.h"
-
 #include "../Program/GLSLCommon.h"
 #include "../Program/ShaderInterpreter.h"
 #include "../rsx_methods.h"
+#include "VKHelpers.h"
+#include "VKRenderPass.h"
 
 namespace vk
 {
-	void shader_interpreter::build_vs()
+	glsl::shader* shader_interpreter::build_vs(u64 compiler_options)
 	{
 		::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_vertex_program;
@@ -22,7 +24,14 @@ namespace vk
 		std::string shader_str;
 		ParamArray arr;
 		VKVertexProgram vk_prog;
+
+		null_prog.ctrl = (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+			? RSX_SHADER_CONTROL_INSTANCED_CONSTANTS
+			: 0;
 		VKVertexDecompilerThread comp(null_prog, shader_str, arr, vk_prog);
+
+		// Initialize compiler properties
+		comp.properties.has_indexed_constants = true;
 
 		ParamType uniforms = { PF_PARAM_UNIFORM, "vec4" };
 		uniforms.items.emplace_back("vc[468]", -1);
@@ -43,14 +52,25 @@ namespace vk
 		"	uvec4 vp_instructions[];\n"
 		"};\n\n";
 
+		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		{
+			builder << "#define _ENABLE_INSTANCED_CONSTANTS\n";
+		}
+
+		if (compiler_options)
+		{
+			builder << "\n";
+		}
+
 		::glsl::insert_glsl_legacy_function(builder, properties);
 		::glsl::insert_vertex_input_fetch(builder, ::glsl::glsl_rules::glsl_rules_vulkan);
 
 		builder << program_common::interpreter::get_vertex_interpreter();
 		const std::string s = builder.str();
 
-		m_vs.create(::glsl::program_domain::glsl_vertex_program, s);
-		m_vs.compile();
+		auto vs = std::make_unique<glsl::shader>();
+		vs->create(::glsl::program_domain::glsl_vertex_program, s);
+		vs->compile();
 
 		// Prepare input table
 		const auto& binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
@@ -83,6 +103,10 @@ namespace vk
 		m_vs_inputs.push_back(in);
 
 		// TODO: Bind textures if needed
+
+		auto ret = vs.get();
+		m_shader_cache[compiler_options].m_vs = std::move(vs);
+		return ret;
 	}
 
 	glsl::shader* shader_interpreter::build_fs(u64 compiler_options)
@@ -199,7 +223,7 @@ namespace vk
 		builder << program_common::interpreter::get_fragment_interpreter();
 		const std::string s = builder.str();
 
-		auto fs = new glsl::shader();
+		auto fs = std::make_unique<glsl::shader>();
 		fs->create(::glsl::program_domain::glsl_fragment_program, s);
 		fs->compile();
 
@@ -226,84 +250,20 @@ namespace vk
 			m_fs_inputs.push_back(in);
 		}
 
-		m_fs_cache[compiler_options].reset(fs);
-		return fs;
+		auto ret = fs.get();
+		m_shader_cache[compiler_options].m_fs = std::move(fs);
+		return ret;
 	}
 
 	std::pair<VkDescriptorSetLayout, VkPipelineLayout> shader_interpreter::create_layout(VkDevice dev)
 	{
 		const auto& binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
-		rsx::simple_array<VkDescriptorSetLayoutBinding> bindings(binding_table.total_descriptor_bindings);
+		auto bindings = get_common_binding_table();
+		u32 idx = ::size32(bindings);
 
-		u32 idx = 0;
+		bindings.resize(binding_table.total_descriptor_bindings);
 
-		// Vertex stream, one stream for cacheable data, one stream for transient data. Third stream contains vertex layout info
-		for (int i = 0; i < 3; i++)
-		{
-			bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-			bindings[idx].descriptorCount = 1;
-			bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-			bindings[idx].binding = binding_table.vertex_buffers_first_bind_slot + i;
-			bindings[idx].pImmutableSamplers = nullptr;
-			idx++;
-		}
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		bindings[idx].binding = binding_table.fragment_constant_buffers_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		bindings[idx].binding = binding_table.fragment_state_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		bindings[idx].binding = binding_table.fragment_texture_params_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		bindings[idx].binding = binding_table.vertex_constant_buffers_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
-		bindings[idx].binding = binding_table.vertex_params_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		bindings[idx].binding = binding_table.conditional_render_predicate_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
-		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[idx].descriptorCount = 1;
-		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		bindings[idx].binding = binding_table.rasterizer_env_bind_slot;
-		bindings[idx].pImmutableSamplers = nullptr;
-
-		idx++;
-
+		// Texture 1D array
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[idx].descriptorCount = 16;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -313,6 +273,7 @@ namespace vk
 		m_fragment_textures_start = bindings[idx].binding;
 		idx++;
 
+		// Texture 2D array
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[idx].descriptorCount = 16;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -321,6 +282,7 @@ namespace vk
 
 		idx++;
 
+		// Texture 3D array
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[idx].descriptorCount = 16;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -329,6 +291,7 @@ namespace vk
 
 		idx++;
 
+		// Texture CUBE array
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[idx].descriptorCount = 16;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -337,6 +300,7 @@ namespace vk
 
 		idx++;
 
+		// Vertex texture array (2D only)
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[idx].descriptorCount = 4;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
@@ -345,6 +309,7 @@ namespace vk
 
 		idx++;
 
+		// Vertex program ucode block
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		bindings[idx].descriptorCount = 1;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
@@ -354,6 +319,7 @@ namespace vk
 		m_vertex_instruction_start = bindings[idx].binding;
 		idx++;
 
+		// Fragment program ucode block
 		bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		bindings[idx].descriptorCount = 1;
 		bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -363,6 +329,8 @@ namespace vk
 		m_fragment_instruction_start = bindings[idx].binding;
 		idx++;
 		bindings.resize(idx);
+
+		m_descriptor_pool_sizes = get_descriptor_pool_sizes(bindings);
 
 		std::array<VkPushConstantRange, 1> push_constants;
 		push_constants[0].offset = 0;
@@ -392,16 +360,7 @@ namespace vk
 	void shader_interpreter::create_descriptor_pools(const vk::render_device& dev)
 	{
 		const auto max_draw_calls = dev.get_descriptor_max_draw_calls();
-
-		rsx::simple_array<VkDescriptorPoolSize> sizes =
-		{
-			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 6 },
-			{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER , 3 },
-			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER , 68 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
-		};
-
-		m_descriptor_pool.create(dev, sizes, max_draw_calls);
+		m_descriptor_pool.create(dev, m_descriptor_pool_sizes, max_draw_calls);
 	}
 
 	void shader_interpreter::init(const vk::render_device& dev)
@@ -409,9 +368,6 @@ namespace vk
 		m_device = dev;
 		std::tie(m_shared_descriptor_layout, m_shared_pipeline_layout) = create_layout(dev);
 		create_descriptor_pools(dev);
-
-		build_vs();
-		// TODO: Seed the cache
 	}
 
 	void shader_interpreter::destroy()
@@ -419,13 +375,13 @@ namespace vk
 		m_program_cache.clear();
 		m_descriptor_pool.destroy();
 
-		for (auto &fs : m_fs_cache)
+		for (auto &fs : m_shader_cache)
 		{
-			fs.second->destroy();
+			fs.second.m_vs->destroy();
+			fs.second.m_fs->destroy();
 		}
 
-		m_vs.destroy();
-		m_fs_cache.clear();
+		m_shader_cache.clear();
 
 		if (m_shared_pipeline_layout)
 		{
@@ -442,20 +398,22 @@ namespace vk
 
 	glsl::program* shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt)
 	{
-		glsl::shader* fs;
-		if (auto found = m_fs_cache.find(compiler_opt); found != m_fs_cache.end())
+		glsl::shader *fs, *vs;
+		if (auto found = m_shader_cache.find(compiler_opt); found != m_shader_cache.end())
 		{
-			fs = found->second.get();
+			fs = found->second.m_fs.get();
+			vs = found->second.m_vs.get();
 		}
 		else
 		{
 			fs = build_fs(compiler_opt);
+			vs = build_vs(compiler_opt);
 		}
 
 		VkPipelineShaderStageCreateInfo shader_stages[2] = {};
 		shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		shader_stages[0].module = m_vs.get_handle();
+		shader_stages[0].module = vs->get_handle();
 		shader_stages[0].pName = "main";
 
 		shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -463,15 +421,17 @@ namespace vk
 		shader_stages[1].module = fs->get_handle();
 		shader_stages[1].pName = "main";
 
-		std::vector<VkDynamicState> dynamic_state_descriptors;
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_VIEWPORT);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_SCISSOR);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_LINE_WIDTH);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_BLEND_CONSTANTS);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_STENCIL_REFERENCE);
-		dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
+		std::vector<VkDynamicState> dynamic_state_descriptors =
+		{
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR,
+			VK_DYNAMIC_STATE_LINE_WIDTH,
+			VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+			VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+			VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+			VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+			VK_DYNAMIC_STATE_DEPTH_BIAS
+		};
 
 		if (vk::get_current_renderer()->get_depth_bounds_support())
 		{
@@ -502,6 +462,9 @@ namespace vk
 		VkPipelineColorBlendStateCreateInfo cs = properties.state.cs;
 		cs.pAttachments = properties.state.att_state;
 
+		VkPipelineTessellationStateCreateInfo ts = {};
+		ts.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+
 		VkGraphicsPipelineCreateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		info.pVertexInputState = &vi;
@@ -511,6 +474,7 @@ namespace vk
 		info.pMultisampleState = &ms;
 		info.pViewportState = &vp;
 		info.pDepthStencilState = &properties.state.ds;
+		info.pTessellationState = &ts;
 		info.stageCount = 2;
 		info.pStages = shader_stages;
 		info.pDynamicState = &dynamic_state_info;
@@ -538,7 +502,11 @@ namespace vk
 		return m_descriptor_pool.allocate(m_shared_descriptor_layout);
 	}
 
-	glsl::program* shader_interpreter::get(const vk::pipeline_props& properties, const program_hash_util::fragment_program_utils::fragment_program_metadata& metadata)
+	glsl::program* shader_interpreter::get(
+		const vk::pipeline_props& properties,
+		const program_hash_util::fragment_program_utils::fragment_program_metadata& metadata,
+		u32 vp_ctrl,
+		u32 fp_ctrl)
 	{
 		pipeline_key key;
 		key.compiler_opt = 0;
@@ -573,13 +541,14 @@ namespace vk
 			}
 		}
 
-		if (rsx::method_registers.shader_control() & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT;
-		if (rsx::method_registers.shader_control() & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT;
-		if (rsx::method_registers.shader_control() & RSX_SHADER_CONTROL_USES_KIL) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_KIL;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT;
+		if (fp_ctrl & RSX_SHADER_CONTROL_USES_KIL) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_KIL;
 		if (metadata.referenced_textures_mask) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES;
 		if (metadata.has_branch_instructions) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_FLOW_CTRL;
 		if (metadata.has_pack_instructions) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_PACKING;
 		if (rsx::method_registers.polygon_stipple_enabled()) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_STIPPLING;
+		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING;
 
 		if (m_current_key == key) [[likely]]
 		{

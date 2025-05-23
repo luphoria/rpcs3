@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Emu/Io/pad_types.h"
-
 #include <QComboBox>
 #include <QDialog>
 #include <QTabWidget>
@@ -21,6 +19,7 @@ public:
 		usio,
 		gem,
 		ds3gem,
+		mousegem,
 		guncon3,
 		topshotelite,
 		topshotfearmaster,

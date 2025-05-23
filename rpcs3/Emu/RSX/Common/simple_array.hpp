@@ -23,9 +23,9 @@ namespace rsx
 		Ty* _data = _local_capacity ? reinterpret_cast<Ty*>(_local_storage) : nullptr;
 		u32 _size = 0;
 
-		inline u64 offset(const_iterator pos)
+		inline u32 offset(const_iterator pos)
 		{
-			return (_data) ? u64(pos - _data) : 0ull;
+			return (_data) ? u32(pos - _data) : 0u;
 		}
 
 		bool is_local_storage() const
@@ -174,7 +174,7 @@ namespace rsx
 			{
 				// Switch to heap storage
 				_data = static_cast<Ty*>(std::malloc(sizeof(Ty) * size));
-				std::memcpy(_data, _local_storage, size_bytes());
+				std::memcpy(static_cast<void*>(_data), _local_storage, size_bytes());
 			}
 			else
 			{
@@ -246,7 +246,7 @@ namespace rsx
 				return pos;
 			}
 
-			ensure(_loc < _size);
+			AUDIT(_loc < _size);
 
 			const auto remaining = (_size - _loc);
 			memmove(pos + 1, pos, remaining * sizeof(Ty));
@@ -274,7 +274,7 @@ namespace rsx
 				return pos;
 			}
 
-			ensure(_loc < _size);
+			AUDIT(_loc < _size);
 
 			const u32 remaining = (_size - _loc);
 			memmove(pos + 1, pos, remaining * sizeof(Ty));
@@ -390,32 +390,47 @@ namespace rsx
 			}
 
 			bool ret = false;
-			for (auto ptr = _data, last = _data + _size - 1; ptr < last; ptr++)
+			for (auto ptr = _data, last = _data + _size - 1; ptr <= last;)
 			{
 				if (predicate(*ptr))
 				{
+					ret = true;
+
+					if (ptr == last)
+					{
+						// Popping the last entry from list. Just set the new size and exit
+						_size--;
+						break;
+					}
+
 					// Move item to the end of the list and shrink by 1
 					std::memcpy(ptr, last, sizeof(Ty));
-					last = _data + (--_size);
-					ret = true;
+					_size--;
+					last--;
+
+					// Retest the same ptr which now has the previous tail item
+					continue;
 				}
+
+				ptr++;
 			}
 
 			return ret;
 		}
 
-		void sort(std::predicate<const Ty&, const Ty&> auto predicate)
+		simple_array<Ty>& sort(std::predicate<const Ty&, const Ty&> auto predicate)
 		{
 			if (_size < 2)
 			{
-				return;
+				return *this;
 			}
 
 			std::sort(begin(), end(), predicate);
+			return *this;
 		}
 
 		template <typename F, typename U = std::invoke_result_t<F, const Ty&>>
-			requires std::is_invocable_v<F, const Ty&>
+			requires (std::is_invocable_v<F, const Ty&> && std::is_trivially_destructible_v<U>)
 		simple_array<U> map(F&& xform) const
 		{
 			simple_array<U> result;
@@ -426,6 +441,32 @@ namespace rsx
 				result.push_back(xform(*it));
 			}
 			return result;
+		}
+
+		template <typename F, typename U = std::invoke_result_t<F, const Ty&>>
+			requires (std::is_invocable_v<F, const Ty&> && !std::is_trivially_destructible_v<U>)
+		std::vector<U> map(F&& xform) const
+		{
+			std::vector<U> result;
+			result.reserve(size());
+
+			for (auto it = begin(); it != end(); ++it)
+			{
+				result.push_back(xform(*it));
+			}
+			return result;
+		}
+
+		template <typename F, typename U>
+			requires std::is_invocable_r_v<U, F, const U&, const Ty&>
+		U reduce(U initial_value, F&& reducer) const
+		{
+			U accumulate = initial_value;
+			for (auto it = begin(); it != end(); ++it)
+			{
+				accumulate = reducer(accumulate, *it);
+			}
+			return accumulate;
 		}
 	};
 }

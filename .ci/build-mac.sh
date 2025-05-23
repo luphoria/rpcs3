@@ -13,11 +13,11 @@ arch -x86_64 /usr/local/bin/brew install -f --overwrite python || arch -x86_64 /
 arch -x86_64 /usr/local/bin/brew uninstall -f --ignore-dependencies ffmpeg
 arch -x86_64 /usr/local/bin/brew install -f --build-from-source ffmpeg@5
 arch -x86_64 /usr/local/bin/brew reinstall -f --build-from-source gnutls freetype
-arch -x86_64 /usr/local/bin/brew install llvm@$LLVM_COMPILER_VER glew cmake sdl2 vulkan-headers coreutils
+arch -x86_64 /usr/local/bin/brew install llvm@$LLVM_COMPILER_VER glew cmake sdl3 vulkan-headers coreutils
 arch -x86_64 /usr/local/bin/brew link -f llvm@$LLVM_COMPILER_VER ffmpeg@5
 
-# moltenvk based on commit for 1.2.11 release
-wget https://raw.githubusercontent.com/Homebrew/homebrew-core/6bfc8950c696d1f952425e8af2a6248603dc0df9/Formula/m/molten-vk.rb
+# moltenvk based on commit for 1.3.0 release
+wget https://raw.githubusercontent.com/Homebrew/homebrew-core/7255441cbcafabaa8950f67c7ec55ff499dbb2d3/Formula/m/molten-vk.rb
 arch -x86_64 /usr/local/bin/brew install -f --overwrite ./molten-vk.rb
 export CXX=clang++
 export CC=clang
@@ -39,13 +39,13 @@ if [ ! -d "/tmp/Qt/$QT_VER" ]; then
   git clone https://github.com/engnr/qt-downloader.git
   cd qt-downloader
   git checkout f52efee0f18668c6d6de2dec0234b8c4bc54c597
-  # nested Qt 6.8.1 URL workaround
+  # nested Qt 6.9.0 URL workaround
   # sed -i '' "s/'qt{0}_{0}{1}{2}'.format(major, minor, patch)]))/'qt{0}_{0}{1}{2}'.format(major, minor, patch), 'qt{0}_{0}{1}{2}'.format(major, minor, patch)]))/g" qt-downloader
   # sed -i '' "s/'{}\/{}\/qt{}_{}\/'/'{0}\/{1}\/qt{2}_{3}\/qt{2}_{3}\/'/g" qt-downloader
   cd "/tmp/Qt"
   "$BREW_X64_PATH/bin/pipenv" run pip3 install py7zr requests semantic_version lxml
   mkdir -p "$QT_VER/macos" ; ln -s "macos" "$QT_VER/clang_64"
-  # sed -i '' 's/args\.version \/ derive_toolchain_dir(args) \/ //g' "$WORKDIR/qt-downloader/qt-downloader" # Qt 6.8.1 workaround
+  # sed -i '' 's/args\.version \/ derive_toolchain_dir(args) \/ //g' "$WORKDIR/qt-downloader/qt-downloader" # Qt 6.9.0 workaround
   "$BREW_X64_PATH/bin/pipenv" run "$WORKDIR/qt-downloader/qt-downloader" macos desktop "$QT_VER" clang_64 --opensource --addons qtmultimedia qtimageformats # -o "$QT_VER/clang_64"
 fi
 
@@ -53,12 +53,12 @@ cd "$WORKDIR"
 ditto "/tmp/Qt/$QT_VER" "qt-downloader/$QT_VER"
 
 export Qt6_DIR="$WORKDIR/qt-downloader/$QT_VER/clang_64/lib/cmake/Qt$QT_VER_MAIN"
-export SDL2_DIR="$BREW_X64_PATH/opt/sdl2/lib/cmake/SDL2"
+export SDL3_DIR="$BREW_X64_PATH/opt/sdl3/lib/cmake/SDL3"
 
 export PATH="$BREW_X64_PATH/opt/llvm@$LLVM_COMPILER_VER/bin:$WORKDIR/qt-downloader/$QT_VER/clang_64/bin:$BREW_BIN:$BREW_SBIN:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/Library/Apple/usr/bin:$PATH"
 export LDFLAGS="-L$BREW_X64_PATH/lib -Wl,-rpath,$BREW_X64_PATH/lib"
-export CPPFLAGS="-I$BREW_X64_PATH/include -msse -msse2 -mcx16 -no-pie -D__MAC_OS_X_VERSION_MIN_REQUIRED=130000"
-export CFLAGS="-D__MAC_OS_X_VERSION_MIN_REQUIRED=130000"
+export CPPFLAGS="-I$BREW_X64_PATH/include -msse -msse2 -mcx16 -no-pie -D__MAC_OS_X_VERSION_MIN_REQUIRED=140000"
+export CFLAGS="-D__MAC_OS_X_VERSION_MIN_REQUIRED=140000"
 export LIBRARY_PATH="$BREW_X64_PATH/lib"
 export LD_LIBRARY_PATH="$BREW_X64_PATH/lib"
 
@@ -78,9 +78,11 @@ sed -i '' "s/extern const double NSAppKitVersionNumber;/const double NSAppKitVer
 
 mkdir build && cd build || exit 1
 
-export MACOSX_DEPLOYMENT_TARGET=13.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 
 "$BREW_X64_PATH/bin/cmake" .. \
+    -DBUILD_RPCS3_TESTS=OFF \
+    -DRUN_RPCS3_TESTS=OFF \
     -DUSE_SDL=ON \
     -DUSE_DISCORD_RPC=ON \
     -DUSE_VULKAN=ON \
@@ -107,7 +109,9 @@ export MACOSX_DEPLOYMENT_TARGET=13.0
     -DLLVM_TARGET_ARCH=X86_64 \
     -DCMAKE_OSX_ARCHITECTURES=x86_64 \
     -DCMAKE_IGNORE_PATH="$BREW_PATH/lib" \
-    -DCMAKE_CXX_FLAGS="-D__MAC_OS_X_VERSION_MIN_REQUIRED=130000" \
+    -DCMAKE_CXX_FLAGS="-D__MAC_OS_X_VERSION_MIN_REQUIRED=140000" \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
     -G Ninja
 
 "$BREW_PATH/bin/ninja"; build_status=$?;

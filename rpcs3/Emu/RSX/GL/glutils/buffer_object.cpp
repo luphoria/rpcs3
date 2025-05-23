@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "buffer_object.h"
+#include "common.h"
 
 namespace gl
 {
@@ -161,7 +162,7 @@ namespace gl
 
 	void buffer::copy_to(buffer* other, u64 src_offset, u64 dst_offset, u64 size)
 	{
-		if (get_driver_caps().ARB_dsa_supported)
+		if (get_driver_caps().ARB_direct_state_access_supported)
 		{
 			glCopyNamedBufferSubData(this->id(), other->id(), src_offset, dst_offset, size);
 		}

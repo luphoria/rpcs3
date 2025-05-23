@@ -10,13 +10,12 @@
 
 #include "util/asm.hpp"
 
-#include <unordered_map>
-
 namespace rsx
 {
 	namespace utility
 	{
 		std::vector<u8> get_rtt_indexes(surface_target color_target);
+		u8 get_mrt_buffers_count(surface_target color_target);
 		usz get_aligned_pitch(surface_color_format format, u32 width);
 		usz get_packed_pitch(surface_color_format format, u32 width);
 	}

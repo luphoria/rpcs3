@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "game_list_grid.h"
 #include "game_list_grid_item.h"
-#include "movie_item.h"
 #include "gui_settings.h"
 #include "qt_utils.h"
 #include "Utilities/File.h"
@@ -15,15 +14,14 @@ game_list_grid::game_list_grid()
 	setObjectName("game_list_grid");
 	setContextMenuPolicy(Qt::CustomContextMenu);
 
-	m_icon_ready_callback = [this](const game_info& game)
+	m_icon_ready_callback = [this](const movie_item_base* item)
 	{
-		Q_EMIT IconReady(game);
+		Q_EMIT IconReady(item);
 	};
 
-	connect(this, &game_list_grid::IconReady, this, [this](const game_info& game)
+	connect(this, &game_list_grid::IconReady, this, [this](const movie_item_base* item)
 	{
-		if (!game || !game->item) return;
-		game->item->call_icon_func();
+		if (item) item->image_change_callback();
 	}, Qt::QueuedConnection); // The default 'AutoConnection' doesn't seem to work in this specific case...
 
 	connect(this, &flow_widget::ItemSelectionChanged, this, [this](int index)
@@ -49,7 +47,6 @@ void game_list_grid::populate(
 {
 	clear_list();
 
-	const QString game_icon_path = play_hover_movies ? QString::fromStdString(fs::get_config_dir() + "/Icons/game_icons/") : "";
 	game_list_grid_item* selected_item = nullptr;
 
 	blockSignals(true);
@@ -84,7 +81,7 @@ void game_list_grid::populate(
 			item->setToolTip(tr("%0 [%1]").arg(title).arg(serial));
 		}
 
-		item->set_icon_func([this, item, game](const QVideoFrame& frame)
+		item->set_image_change_callback([this, item, game](const QVideoFrame& frame)
 		{
 			if (!item || !game)
 			{
@@ -94,29 +91,25 @@ void game_list_grid::populate(
 			if (const QPixmap pixmap = item->get_movie_image(frame); item->get_active() && !pixmap.isNull())
 			{
 				item->set_icon(gui::utils::get_centered_pixmap(pixmap, m_icon_size, 0, 0, 1.0, Qt::FastTransformation));
+				return;
 			}
-			else
-			{
-				std::lock_guard lock(item->pixmap_mutex);
 
+			std::lock_guard lock(item->pixmap_mutex);
+
+			if (!game->pxmap.isNull())
+			{
 				item->set_icon(game->pxmap);
 
 				if (!game->has_hover_gif && !game->has_hover_pam)
 				{
 					game->pxmap = {};
 				}
-
-				item->stop_movie();
 			}
 		});
 
-		if (play_hover_movies && game->has_hover_gif)
+		if (play_hover_movies && (game->has_hover_gif || game->has_hover_pam))
 		{
-			item->set_movie_path(game_icon_path % serial % "/hover.gif");
-		}
-		else if (play_hover_movies && game->has_hover_pam)
-		{
-			item->set_movie_path(QString::fromStdString(game->info.movie_path));
+			item->set_video_path(game->info.movie_path);
 		}
 
 		if (selected_item_id == game->info.path + game->info.icon_path)
@@ -161,7 +154,7 @@ void game_list_grid::repaint_icons(std::vector<game_info>& game_data, const QCol
 			{
 				// We don't have an icon. Set a placeholder to initialize the layout.
 				game->pxmap = placeholder;
-				item->call_icon_func();
+				item->image_change_callback();
 			}
 
 			item->set_icon_load_func([this, game, device_pixel_ratio, cancel = item->icon_loading_aborted()](int)

@@ -3,9 +3,9 @@
 #include "Emu/system_config.h"
 #include "Emu/Audio/audio_utils.h"
 #include "Emu/Cell/PPUModule.h"
+#include "Emu/Cell/timers.hpp"
 #include "Emu/Cell/lv2/sys_process.h"
 #include "Emu/Cell/lv2/sys_event.h"
-#include "Emu/Cell/Modules/cellAudioOut.h"
 #include "cellAudio.h"
 #include "util/video_provider.h"
 
@@ -301,7 +301,7 @@ void audio_ringbuffer::commit_data(f32* buf, u32 sample_cnt)
 	if (g_recording_mode != recording_mode::stopped)
 	{
 		utils::video_provider& provider = g_fxo->get<utils::video_provider>();
-		provider.present_samples(reinterpret_cast<u8*>(buf), sample_cnt, cfg.audio_channels);
+		provider.present_samples(reinterpret_cast<const u8*>(buf), sample_cnt, cfg.audio_channels);
 	}
 
 	// Downmix if necessary
@@ -704,7 +704,7 @@ void cell_audio_thread::operator()()
 
 	thread_ctrl::scoped_priority high_prio(+1);
 
-	while (Emu.IsPaused())
+	while (Emu.IsPausedOrReady())
 	{
 		thread_ctrl::wait_for(5000);
 	}

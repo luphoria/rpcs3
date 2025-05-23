@@ -7,7 +7,6 @@
 #include <QKeyEvent>
 
 #include "game_list_base.h"
-#include "util/atomic.hpp"
 
 #include <functional>
 
@@ -37,7 +36,7 @@ public Q_SLOTS:
 
 Q_SIGNALS:
 	void FocusToSearchBar();
-	void IconReady(const game_info& game);
+	void IconReady(const movie_item_base* item);
 
 protected:
 	movie_item* m_last_hover_item = nullptr;

@@ -9,7 +9,6 @@
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"
-#include "Emu/Cell/MFC.h"
 #include "sys_sync.h"
 #include "sys_lwmutex.h"
 #include "sys_lwcond.h"
@@ -56,7 +55,7 @@
 #include <algorithm>
 #include <optional>
 #include <deque>
-#include <shared_mutex>
+#include <thread>
 #include "util/tsc.hpp"
 #include "util/sysinfo.hpp"
 #include "util/init_mutex.hpp"
@@ -374,7 +373,7 @@ const std::array<std::pair<ppu_intrp_func_t, std::string_view>, 1024> g_ppu_sysc
 
 	uns_func, uns_func, uns_func, uns_func, uns_func,       //255-259  UNS
 
-	NULL_FUNC(sys_spu_image_open_by_fd),                    //260 (0x104)
+	BIND_SYSC(sys_spu_image_open_by_fd),                    //260 (0x104)
 
 	uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, //261-269  UNS
 	uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, uns_func, //270-279  UNS

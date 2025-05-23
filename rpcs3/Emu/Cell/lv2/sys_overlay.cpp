@@ -36,7 +36,7 @@ static error_code overlay_load_module(vm::ptr<u32> ovlmid, const std::string& vp
 
 	u128 klic = g_fxo->get<loaded_npdrm_keys>().last_key();
 
-	src = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic), nullptr, true);
+	src = decrypt_self(std::move(src), reinterpret_cast<u8*>(&klic));
 
 	if (!src)
 	{
@@ -112,7 +112,7 @@ std::function<void(void*)> lv2_overlay::load(utils::serial& ar)
 
 	return [ovlm](void* storage)
 	{
-		*static_cast<shared_ptr<lv2_obj>*>(storage) = ovlm;
+		*static_cast<atomic_ptr<lv2_obj>*>(storage) = ovlm;
 	};
 }
 

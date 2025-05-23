@@ -21,7 +21,7 @@ namespace rsx
 				// First, queue the GPU work. If it flushes the queue for us, the following routines will be faster.
 				const bool handled = RSX(ctx)->get_backend_config().supports_host_gpu_labels && RSX(ctx)->release_GCM_label(address, data);
 
-				if (vm::_ref<RsxSemaphore>(address).val == data)
+				if (vm::_ref<RsxSemaphore>(address) == data)
 				{
 					// It's a no-op to write the same value (although there is a delay in real-hw so it's more accurate to allow GPU label in this case)
 					return;
@@ -41,6 +41,9 @@ namespace rsx
 
 					if constexpr (FlushPipe)
 					{
+						// Syncronization point, may be associated with memory changes without actually changing addresses
+						RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
+
 						// Manually flush the pipeline.
 						// It is possible to stream report writes using the host GPU, but that generates too much submit traffic.
 						RSX(ctx)->sync();
@@ -54,7 +57,7 @@ namespace rsx
 				}
 			}
 
-			vm::_ref<RsxSemaphore>(address).val = data;
+			vm::write<atomic_t<RsxSemaphore>>(address, data);
 		}
 	}
 }

@@ -842,6 +842,7 @@ void spu_cache::initialize(bool build_existing_cache)
 		// Initialize compiler instances for parallel compilation
 		std::unique_ptr<spu_recompiler_base> compiler;
 
+#if defined(ARCH_X64)
 		if (g_cfg.core.spu_decoder == spu_decoder_type::asmjit)
 		{
 			compiler = spu_recompiler_base::make_asmjit_recompiler();
@@ -850,6 +851,22 @@ void spu_cache::initialize(bool build_existing_cache)
 		{
 			compiler = spu_recompiler_base::make_llvm_recompiler();
 		}
+		else
+		{
+			fmt::throw_exception("Unsupported spu decoder '%s'", g_cfg.core.spu_decoder);
+		}
+#elif defined(ARCH_ARM64)
+		if (g_cfg.core.spu_decoder == spu_decoder_type::llvm)
+		{
+			compiler = spu_recompiler_base::make_llvm_recompiler();
+		}
+		else
+		{
+			fmt::throw_exception("Unsupported spu decoder '%s'", g_cfg.core.spu_decoder);
+		}
+#else
+#error "Unimplemented"
+#endif
 
 		compiler->init();
 
@@ -2545,7 +2562,7 @@ bool reg_state_t::is_const() const
 
 bool reg_state_t::compare_tags(const reg_state_t& rhs) const
 {
-	// Compare by tag, address of instruction origin 
+	// Compare by tag, address of instruction origin
 	return tag == rhs.tag && origin == rhs.origin && is_instruction == rhs.is_instruction;
 }
 
@@ -2915,7 +2932,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 
 	// Result bounds
 	u32 lsa = entry_point;
-	u32 limit = 0x40000;
+	u32 limit = SPU_LS_SIZE;
 
 	if (g_cfg.core.spu_block_size == spu_block_size_type::giga)
 	{
@@ -3132,13 +3149,13 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 						break;
 					}
 
-					if (target >= lsa && target < 0x40000)
+					if (target >= lsa && target < SPU_LS_SIZE)
 					{
 						// Possible jump table entry (absolute)
 						jt_abs.push_back(target);
 					}
 
-					if (target + start >= lsa && target + start < 0x40000)
+					if (target + start >= lsa && target + start < SPU_LS_SIZE)
 					{
 						// Possible jump table entry (relative)
 						jt_rel.push_back(target + start);
@@ -3607,7 +3624,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 		}
 	}
 
-	while (lsa > 0 || limit < 0x40000)
+	while (lsa > 0 || limit < SPU_LS_SIZE)
 	{
 		const u32 initial_size = ::size32(result.data);
 
@@ -4001,7 +4018,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 		bool need_repeat = false;
 
 		u32 start = 0;
-		u32 limit = 0x40000;
+		u32 limit = SPU_LS_SIZE;
 
 		// Walk block list in ascending order
 		for (auto& block : m_bbs)
@@ -4012,7 +4029,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			{
 				const auto upper = m_funcs.upper_bound(addr);
 				start = addr;
-				limit = upper == m_funcs.end() ? 0x40000 : upper->first;
+				limit = upper == m_funcs.end() ? SPU_LS_SIZE : upper->first;
 			}
 
 			// Find targets that exceed [start; limit) range and make new functions from them
@@ -4082,7 +4099,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				{
 					const u32 _old = ::at32(m_bbs, pred).chunk;
 
-					if (_old < 0x40000 && _old != _new)
+					if (_old < SPU_LS_SIZE && _old != _new)
 					{
 						// If block has multiple 'entry' points, it becomes an entry point itself
 						new_entries.push_back(addr);
@@ -4107,7 +4124,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 
 				const u32 value = m_entry_info[target / 4] ? target : block.chunk;
 
-				if (u32& tval = tb.chunk; tval < 0x40000)
+				if (u32& tval = tb.chunk; tval < SPU_LS_SIZE)
 				{
 					// TODO: fix condition
 					if (tval != value && !m_entry_info[target / 4])
@@ -4139,7 +4156,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 		for (auto& bb : m_bbs)
 		{
 			// Reset chunk info
-			bb.second.chunk = 0x40000;
+			bb.second.chunk = SPU_LS_SIZE;
 		}
 	}
 
@@ -4201,7 +4218,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				for (u32 i = 0; i < s_reg_max; i++)
 				{
 					if (block.reg_origin[i] == 0x80000000)
-						block.reg_origin[i] = 0x40000;
+						block.reg_origin[i] = SPU_LS_SIZE;
 				}
 			}
 
@@ -4210,7 +4227,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				for (u32 i = 0; i < s_reg_max; i++)
 				{
 					if (block.reg_origin_abs[i] == 0x80000000)
-						block.reg_origin_abs[i] = 0x40000;
+						block.reg_origin_abs[i] = SPU_LS_SIZE;
 					else if (block.reg_origin_abs[i] + 1 == 0)
 						block.reg_origin_abs[i] = -2;
 				}
@@ -4239,8 +4256,8 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 						}
 						else if (tb.reg_origin[i] != expected)
 						{
-							// Set -1 if multiple origins merged (requires PHI node)
-							tb.reg_origin[i] = -1;
+							// Set umax if multiple origins merged (requires PHI node)
+							tb.reg_origin[i] = umax;
 
 							must_repeat |= !tb.targets.empty();
 						}
@@ -4256,9 +4273,9 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 						}
 						else if (tb.reg_origin_abs[i] != expected)
 						{
-							if (tb.reg_origin_abs[i] == 0x40000 || expected + 2 == 0 || expected == 0x40000)
+							if (tb.reg_origin_abs[i] == SPU_LS_SIZE || expected + 2 == 0 || expected == SPU_LS_SIZE)
 							{
-								// Set -2: sticky value indicating possible external reg origin (0x40000)
+								// Set -2: sticky value indicating possible external reg origin (SPU_LS_SIZE)
 								tb.reg_origin_abs[i] = -2;
 
 								must_repeat |= !tb.targets.empty();
@@ -4288,9 +4305,9 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			// Reset values for the next attempt (keep negative values)
 			for (u32 i = 0; i < s_reg_max; i++)
 			{
-				if (block.reg_origin[i] <= 0x40000)
+				if (block.reg_origin[i] <= SPU_LS_SIZE)
 					block.reg_origin[i] = 0x80000000;
-				if (block.reg_origin_abs[i] <= 0x40000)
+				if (block.reg_origin_abs[i] <= SPU_LS_SIZE)
 					block.reg_origin_abs[i] = 0x80000000;
 			}
 		}
@@ -4323,21 +4340,21 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				bb.reg_val32[i] = src.reg_val32[i];
 			}
 
-			if (!bb.reg_save_dom[i] && bb.reg_use[i] && (orig == 0x40000 || orig + 2 == 0))
+			if (!bb.reg_save_dom[i] && bb.reg_use[i] && (orig == SPU_LS_SIZE || orig + 2 == 0))
 			{
 				// Destroy offset if external reg value is used
 				func.reg_save_off[i] = -1;
 			}
 		}
 
-		if (u32 orig = bb.reg_origin_abs[s_reg_sp]; orig < 0x40000)
+		if (u32 orig = bb.reg_origin_abs[s_reg_sp]; orig < SPU_LS_SIZE)
 		{
 			auto& prologue = ::at32(m_bbs, orig);
 
 			// Copy stack offset (from the assumed prologue)
 			bb.stack_sub = prologue.stack_sub;
 		}
-		else if (orig > 0x40000)
+		else if (orig > SPU_LS_SIZE)
 		{
 			// Unpredictable stack
 			bb.stack_sub = 0x80000000;
@@ -4510,7 +4527,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				}
 
 				// Check for funny values.
-				if (bb.stack_sub >= 0x40000 || bb.stack_sub % 16)
+				if (bb.stack_sub >= SPU_LS_SIZE || bb.stack_sub % 16)
 				{
 					bb.stack_sub = 0x80000000;
 				}
@@ -4603,7 +4620,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			{
 				bb.terminator = term_type::interrupt_call;
 			}
-			else if (last_inst != spu_itype::BISL && bb.targets[0] == tia + 4 && op.ra == s_reg_lr)
+			else if (last_inst != spu_itype::BISL && !bb.targets.empty() && bb.targets[0] == tia + 4 && op.ra == s_reg_lr)
 			{
 				// Conditional return (TODO)
 				bb.terminator = term_type::ret;
@@ -4659,7 +4676,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			if (is_ok && bb.terminator == term_type::ret)
 			{
 				// Check $LR (alternative return registers are currently not supported)
-				if (u32 lr_orig = bb.reg_mod[s_reg_lr] ? addr : bb.reg_origin_abs[s_reg_lr]; lr_orig < 0x40000)
+				if (u32 lr_orig = bb.reg_mod[s_reg_lr] ? addr : bb.reg_origin_abs[s_reg_lr]; lr_orig < SPU_LS_SIZE)
 				{
 					auto& src = ::at32(m_bbs, lr_orig);
 
@@ -4674,7 +4691,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 						is_ok = false;
 					}
 				}
-				else if (lr_orig > 0x40000)
+				else if (lr_orig > SPU_LS_SIZE)
 				{
 					spu_log.todo("Function 0x%05x: [0x%05x] $LR unpredictable (src=0x%x)", f.first, addr, lr_orig);
 					is_ok = false;
@@ -4683,7 +4700,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 				// Check $80..$127 (should be restored or unmodified)
 				for (u32 i = s_reg_80; is_ok && i <= s_reg_127; i++)
 				{
-					if (u32 orig = bb.reg_mod[i] ? addr : bb.reg_origin_abs[i]; orig < 0x40000)
+					if (u32 orig = bb.reg_mod[i] ? addr : bb.reg_origin_abs[i]; orig < SPU_LS_SIZE)
 					{
 						auto& src = ::at32(m_bbs, orig);
 
@@ -4693,7 +4710,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 							is_ok = false;
 						}
 					}
-					else if (orig > 0x40000)
+					else if (orig > SPU_LS_SIZE)
 					{
 						spu_log.todo("Function 0x%05x: [0x%05x] $%u unpredictable (src=0x%x)", f.first, addr, i, orig);
 						is_ok = false;
@@ -4728,9 +4745,11 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			if (is_ok && bb.terminator == term_type::fallthrough)
 			{
 				// Can't just fall out of the function
-				if (bb.targets.size() != 1 || bb.targets[0] >= flim)
+				const auto bb_target_value = bb.targets.empty() ? 0 : bb.targets[0];
+
+				if (bb.targets.size() != 1 || bb_target_value >= flim)
 				{
-					spu_log.error("Function 0x%05x: [0x%05x] bad fallthrough to 0x%x", f.first, addr, bb.targets[0]);
+					spu_log.error("Function 0x%05x: [0x%05x] bad fallthrough to 0x%x", f.first, addr, bb_target_value);
 					is_ok = false;
 				}
 			}
@@ -5227,7 +5246,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 
 				auto& block = infos[bpc];
 
-				if (pos == entry_point || (g_cfg.core.spu_block_size != spu_block_size_type::safe && (m_ret_info[bpc / 4] || m_entry_info[bpc / 4])))
+				if (bpc == entry_point || (g_cfg.core.spu_block_size != spu_block_size_type::safe && (m_ret_info[bpc / 4] || m_entry_info[bpc / 4])))
 				{
 					// Do not allow value passthrough
 					for (reg_state_t& f : block->start_reg_state)
@@ -6064,7 +6083,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 									else if (atomic16->ls_offs.compare_with_mask_indifference(atomic16->lsa, SPU_LS_MASK_128) && atomic16->ls.is_less_than(128 - (atomic16->ls_offs.value & 127)))
 									{
 										// Relative memory access with offset less than 128 bytes
-										// Common around SPU utilities which have less strict restrictions about memory alignment 
+										// Common around SPU utilities which have less strict restrictions about memory alignment
 										ok = true;
 									}
 								}
@@ -6338,7 +6357,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			{
 				atomic16->mem_count++;
 
-				// Do not clear lower 16 bytes addressing because the program can move on 4-byte basis 
+				// Do not clear lower 16 bytes addressing because the program can move on 4-byte basis
 				const u32 offs = spu_branch_target(pos - result.lower_bound, op.si16);
 
 				if (atomic16->lsa.is_const() && [&]()
@@ -7267,6 +7286,24 @@ void spu_recompiler_base::dump(const spu_program& result, std::string& out)
 
 	for (auto& bb : m_bbs)
 	{
+		if (m_block_info[bb.first / 4])
+		{
+			fmt::append(out, "A: [0x%05x] %s\n", bb.first, m_entry_info[bb.first / 4] ? (m_ret_info[bb.first / 4] ? "Chunk" : "Entry") : "Block");
+
+			fmt::append(out, "\t F: 0x%05x\n", bb.second.func);
+
+			for (u32 pred : bb.second.preds)
+			{
+				fmt::append(out, "\t <- 0x%05x\n", pred);
+			}
+		}
+		else
+		{
+			fmt::append(out, "A: [0x%05x] ?\n", bb.first);
+		}
+
+		out += "\n";
+
 		for (u32 pos = bb.first, end = bb.first + bb.second.size * 4; pos < end; pos += 4)
 		{
 			dis_asm.disasm(pos);
@@ -7283,23 +7320,10 @@ void spu_recompiler_base::dump(const spu_program& result, std::string& out)
 
 		if (m_block_info[bb.first / 4])
 		{
-			fmt::append(out, "A: [0x%05x] %s\n", bb.first, m_entry_info[bb.first / 4] ? (m_ret_info[bb.first / 4] ? "Chunk" : "Entry") : "Block");
-
-			fmt::append(out, "\tF: 0x%05x\n", bb.second.func);
-
-			for (u32 pred : bb.second.preds)
-			{
-				fmt::append(out, "\t<- 0x%05x\n", pred);
-			}
-
 			for (u32 target : bb.second.targets)
 			{
 				fmt::append(out, "\t-> 0x%05x%s\n", target, m_bbs.count(target) ? "" : " (null)");
 			}
-		}
-		else
-		{
-			fmt::append(out, "A: [0x%05x] ?\n", bb.first);
 		}
 
 		out += '\n';
@@ -7352,7 +7376,7 @@ struct spu_llvm_worker
 				set_relax_flag = false;
 			}
 
-			thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&registered)[1], 0);
+			thread_ctrl::wait_on(registered.get_wait_atomic(), 0);
 			slice = registered.pop_all();
 		}())
 		{
@@ -7467,7 +7491,7 @@ struct spu_llvm
 		while (!registered && thread_ctrl::state() != thread_state::aborting)
 		{
 			// Wait for the first SPU block before launching any thread
-			thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&registered)[1], 0);
+			thread_ctrl::wait_on(registered.get_wait_atomic(), 0);
 		}
 
 		if (thread_ctrl::state() == thread_state::aborting)
@@ -7570,7 +7594,7 @@ struct spu_llvm
 
 				// Interrupt profiler thread and put it to sleep
 				static_cast<void>(prof_mutex.reset());
-				thread_ctrl::wait_on(utils::bless<atomic_t<u32>>(&registered)[1], 0);
+				thread_ctrl::wait_on(registered.get_wait_atomic(), 0);
 				std::fill(notify_compile.begin(), notify_compile.end(), 0); // Reset notification flags
 				notify_compile_count = 0;
 				compile_pending = 0;
@@ -8135,7 +8159,7 @@ std::array<reg_state_t, s_reg_max>& block_reg_info::evaluate_start_state(const s
 					// Check if the node is resolved
 					if (!node->has_true_state)
 					{
-						// Assume this block cannot be resolved at the moment 
+						// Assume this block cannot be resolved at the moment
 						is_all_resolved = false;
 						break;
 					}
@@ -8149,7 +8173,7 @@ std::array<reg_state_t, s_reg_max>& block_reg_info::evaluate_start_state(const s
 
 				auto& res_state = is_all_resolved ? cur_node->start_reg_state : temp;
 
-				for (usz bi = 0; bi < it->state_prev.size(); bi++)
+				for (usz bi = 0, is_first = 1; bi < it->state_prev.size(); bi++)
 				{
 					if (it->state_prev[bi].disconnected)
 					{
@@ -8173,7 +8197,7 @@ std::array<reg_state_t, s_reg_max>& block_reg_info::evaluate_start_state(const s
 						ensure(it->state_prev[bi].state_written);
 					}
 
-					if (bi == 0)
+					if (is_first)
 					{
 						res_state = *arg_state;
 					}
@@ -8181,6 +8205,8 @@ std::array<reg_state_t, s_reg_max>& block_reg_info::evaluate_start_state(const s
 					{
 						merge(res_state, res_state, *arg_state, it->block_pc);
 					}
+
+					is_first = 0;
 				}
 
 				std::array<reg_state_t, s_reg_max>* result_storage{};

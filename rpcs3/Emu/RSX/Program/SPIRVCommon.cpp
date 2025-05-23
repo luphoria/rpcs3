@@ -13,6 +13,8 @@
 #endif
 #endif
 #include "3rdparty/glslang/glslang/SPIRV/GlslangToSpv.h"
+#include "3rdparty/glslang/glslang/glslang/Include/ResourceLimits.h"
+#include "3rdparty/glslang/glslang/glslang/Public/ShaderLang.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #else
@@ -20,7 +22,7 @@
 #endif
 
 #include "SPIRVCommon.h"
-#include "GLSLCommon.h"
+#include "Emu/RSX/Program/GLSLTypes.h"
 
 namespace spirv
 {

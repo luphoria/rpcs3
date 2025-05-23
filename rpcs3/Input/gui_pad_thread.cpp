@@ -10,13 +10,11 @@
 #elif HAVE_LIBEVDEV
 #include "evdev_joystick_handler.h"
 #endif
-#ifdef HAVE_SDL2
+#ifdef HAVE_SDL3
 #include "sdl_pad_handler.h"
 #endif
 #include "Emu/Io/PadHandler.h"
-#include "Emu/System.h"
 #include "Emu/system_config.h"
-#include "Utilities/Thread.h"
 #include "rpcs3qt/gui_settings.h"
 
 #ifdef __linux__
@@ -40,20 +38,17 @@
 
 LOG_CHANNEL(gui_log, "GUI");
 
+atomic_t<bool> gui_pad_thread::m_reset = false;
+
 gui_pad_thread::gui_pad_thread()
 {
-	m_thread = std::make_unique<std::thread>(&gui_pad_thread::run, this);
+	m_thread = std::make_unique<named_thread<std::function<void()>>>("Gui Pad Thread", [this](){ run(); });
 }
 
 gui_pad_thread::~gui_pad_thread()
 {
-	m_terminate = true;
-
-	if (m_thread && m_thread->joinable())
-	{
-		m_thread->join();
-		m_thread.reset();
-	}
+	// Join thread
+	m_thread.reset();
 
 #ifdef __linux__
 	if (m_uinput_fd != 1)
@@ -145,6 +140,11 @@ bool gui_pad_thread::init()
 		gui_log.notice("gui_pad_thread: Pad %d: device='%s', handler=%s, VID=0x%x, PID=0x%x, class_type=0x%x, class_profile=0x%x",
 			i, cfg->device.to_string(), m_pad->m_pad_handler, m_pad->m_vendor_id, m_pad->m_product_id, m_pad->m_class_type, m_pad->m_class_profile);
 
+		if (handler_type != pad_handler::null)
+		{
+			input_log.notice("gui_pad_thread %d: config=\n%s", i, cfg->to_string());
+		}
+
 		// We only use one pad
 		break;
 	}
@@ -219,7 +219,7 @@ std::shared_ptr<PadHandlerBase> gui_pad_thread::GetHandler(pad_handler type)
 	case pad_handler::mm:
 		return std::make_shared<mm_joystick_handler>();
 #endif
-#ifdef HAVE_SDL2
+#ifdef HAVE_SDL3
 	case pad_handler::sdl:
 		return std::make_shared<sdl_pad_handler>();
 #endif
@@ -247,24 +247,27 @@ void gui_pad_thread::InitPadConfig(cfg_pad& cfg, pad_handler type, std::shared_p
 
 void gui_pad_thread::run()
 {
-	thread_base::set_name("Gui Pad Thread");
-
 	gui_log.notice("gui_pad_thread: Pad thread started");
 
-	if (!init())
-	{
-		gui_log.warning("gui_pad_thread: Pad thread stopped (init failed)");
-		return;
-	}
+	m_reset = true;
 
-	while (!m_terminate)
+	while (thread_ctrl::state() != thread_state::aborting)
 	{
+		if (m_reset && m_reset.exchange(false))
+		{
+			if (!init())
+			{
+				gui_log.warning("gui_pad_thread: Pad thread stopped (init failed during reset)");
+				return;
+			}
+		}
+
 		// Only process input if there is an active window
 		if (m_handler && m_pad && (m_allow_global_input || QApplication::activeWindow()))
 		{
 			m_handler->process();
 
-			if (m_terminate)
+			if (thread_ctrl::state() == thread_state::aborting)
 			{
 				break;
 			}
@@ -272,12 +275,7 @@ void gui_pad_thread::run()
 			process_input();
 		}
 
-		if (m_terminate)
-		{
-			break;
-		}
-
-		std::this_thread::sleep_for(10ms);
+		thread_ctrl::wait_for(10000);
 	}
 
 	gui_log.notice("gui_pad_thread: Pad thread stopped");

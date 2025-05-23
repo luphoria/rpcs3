@@ -1,5 +1,6 @@
 #pragma once // No BOM and only basic ASCII in this header, or a neko will die
 
+#include "util/serialization.hpp"
 #include "util/types.hpp"
 #include "util/shared_ptr.hpp"
 #include "bit_set.h"
@@ -78,6 +79,8 @@ namespace fs
 		constexpr bool operator==(const stat_t&) const = default;
 	};
 
+	static_assert(utils::Bitcopy<stat_t>);
+
 	// Helper, layout is equal to iovec struct
 	struct iovec_clone
 	{
@@ -111,6 +114,9 @@ namespace fs
 		virtual native_handle get_handle();
 		virtual file_id get_id();
 		virtual u64 write_gather(const iovec_clone* buffers, u64 buf_count);
+		virtual void release()
+		{
+		}
 	};
 
 	// Directory entry (TODO)
@@ -125,6 +131,8 @@ namespace fs
 
 		using enable_bitcopy = std::false_type;
 	};
+
+	static_assert(!utils::Bitcopy<dir_entry>);
 
 	// Directory handle base
 	struct dir_base
@@ -246,6 +254,8 @@ namespace fs
 		// Open file with specified mode
 		explicit file(const std::string& path, bs_t<open_mode> mode = ::fs::read);
 
+		static file from_native_handle(native_handle handle);
+
 		// Open memory for read
 		explicit file(const void* ptr, usz size);
 
@@ -275,9 +285,17 @@ namespace fs
 			m_file = std::move(ptr);
 		}
 
+		void release_handle()
+		{
+			if (m_file)
+			{
+				release()->release();
+			}
+		}
+
 		std::unique_ptr<file_base> release()
 		{
-			return std::move(m_file);
+			return std::exchange(m_file, nullptr);
 		}
 
 		// Change file size (possibly appending zero bytes)
@@ -599,11 +617,14 @@ namespace fs
 	// Get executable containing directory
 	std::string get_executable_dir();
 
-	// Get configuration directory
-	const std::string& get_config_dir();
+	// Get configuration directory. Set get_config_subdirectory to true to get the nested config dir on windows.
+	const std::string& get_config_dir(bool get_config_subdirectory = false);
 
 	// Get common cache directory
 	const std::string& get_cache_dir();
+
+	// Get common log directory
+	const std::string& get_log_dir();
 
 	// Temporary directory
 	const std::string& get_temp_dir();

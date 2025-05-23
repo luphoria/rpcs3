@@ -1,18 +1,13 @@
 #pragma once
 
 #include "Utilities/mutex.h"
-#include "Utilities/sema.h"
 
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"
-#include "Emu/Cell/timers.hpp"
-#include "Emu/Memory/vm_reservation.h"
 #include "Emu/IdManager.h"
 #include "Emu/IPC.h"
 
 #include "util/shared_ptr.hpp"
-
-#include <thread>
 
 // attr_protocol (waiting scheduling policy)
 enum lv2_protocol : u8
@@ -449,7 +444,7 @@ public:
 	static std::function<void(void*)> load_func(shared_ptr<T> make, u64 pshared = umax)
 	{
 		const u64 key = make->key;
-		return [ptr = load<T>(key, make, pshared)](void* storage) { *static_cast<shared_ptr<Storage>*>(storage) = ptr; };
+		return [ptr = load<T>(key, make, pshared)](void* storage) { *static_cast<atomic_ptr<Storage>*>(storage) = ptr; };
 	}
 
 	static bool wait_timeout(u64 usec, ppu_thread* cpu = {}, bool scale = true, bool is_usleep = false);

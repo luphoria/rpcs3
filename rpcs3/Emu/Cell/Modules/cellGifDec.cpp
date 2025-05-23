@@ -9,14 +9,7 @@
 #include "Emu/Cell/lv2/sys_fs.h"
 #include "cellGifDec.h"
 
-#include "util/asm.hpp"
-
 LOG_CHANNEL(cellGifDec);
-
-// Temporarily
-#ifndef _MSC_VER
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif
 
 template <>
 void fmt_class_string<CellGifDecError>::format(std::string& out, u64 arg)

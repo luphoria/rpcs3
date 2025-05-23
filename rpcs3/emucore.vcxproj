@@ -40,10 +40,10 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <AdditionalIncludeDirectories>..\3rdparty\miniupnp\miniupnp\miniupnpc\include;..\3rdparty\wolfssl\wolfssl;..\3rdparty\flatbuffers\include;..\3rdparty\libusb\libusb\libusb;..\3rdparty\yaml-cpp\yaml-cpp\include;..\3rdparty\SoundTouch\soundtouch\include;..\3rdparty\rtmidi\rtmidi;..\3rdparty\zlib\zlib;$(SolutionDir)build\lib\$(Configuration)-$(Platform)\llvm_build\include;$(SolutionDir)build\lib_ext\$(Configuration)-$(Platform)\llvm_build\include;$(SolutionDir)build\lib_ext\$(Configuration)-$(Platform)\llvm\include;$(VULKAN_SDK)\Include;..\3rdparty\zstd\zstd\lib;$(SolutionDir)3rdparty\fusion\fusion\Fusion</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\3rdparty\miniupnp\miniupnp\miniupnpc\include;..\3rdparty\wolfssl\wolfssl;..\3rdparty\flatbuffers\include;..\3rdparty\libusb\libusb\libusb;..\3rdparty\yaml-cpp\yaml-cpp\include;..\3rdparty\SoundTouch\soundtouch\include;..\3rdparty\rtmidi\rtmidi;..\3rdparty\zlib\zlib;$(SolutionDir)build\lib\$(Configuration)-$(Platform)\llvm_build\include;$(SolutionDir)build\lib_ext\$(Configuration)-$(Platform)\llvm_build\include;$(SolutionDir)build\lib_ext\$(Configuration)-$(Platform)\llvm\include;$(SolutionDir)build\lib_ext\$(Configuration)-$(Platform)\llvm_build\include;$(VULKAN_SDK)\Include;..\3rdparty\zstd\zstd\lib;$(SolutionDir)3rdparty\fusion\fusion\Fusion;$(SolutionDir)3rdparty\wolfssl\extra\win32;$(SolutionDir)3rdparty\libsdl-org\SDL\include;$(SolutionDir)3rdparty\glslang\glslang</AdditionalIncludeDirectories>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MaxSpeed</Optimization>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL3;ZLIB_CONST;WOLFSSL_USER_SETTINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL3;ZLIB_CONST;WOLFSSL_USER_SETTINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
     </ClCompile>
@@ -51,9 +51,16 @@
       <Command>cmd.exe /c "$(SolutionDir)\Utilities\git-version-gen.cmd"</Command>
       <Message>Updating git-version.h</Message>
     </PreBuildEvent>
+    <Lib>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ntdll.lib</AdditionalDependencies>
+    </Lib>
+    <Lib>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ntdll.lib</AdditionalDependencies>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Utilities\cheat_info.cpp" />
+    <ClCompile Include="..\Utilities\date_time.cpp" />
     <ClCompile Include="..\Utilities\stack_trace.cpp" />
     <ClCompile Include="Crypto\decrypt_binaries.cpp" />
     <ClCompile Include="Crypto\unzip.cpp" />
@@ -66,6 +73,7 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Emu\cache_utils.cpp" />
+    <ClCompile Include="Emu\Cell\ErrorCodes.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_game.cpp" />
     <ClCompile Include="Emu\Cell\Modules\cellMusicSelectionContext.cpp" />
     <ClCompile Include="Emu\Cell\Modules\libfs_utility_init.cpp" />
@@ -74,6 +82,9 @@
     <ClCompile Include="Emu\games_config.cpp" />
     <ClCompile Include="Emu\Io\Buzz.cpp" />
     <ClCompile Include="Emu\Io\camera_config.cpp" />
+    <ClCompile Include="Emu\Io\evdev_gun_handler.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="Emu\Io\GameTablet.cpp" />
     <ClCompile Include="Emu\Io\GHLtar.cpp" />
     <ClCompile Include="Emu\Io\GunCon3.cpp" />
@@ -88,6 +99,8 @@
     <ClCompile Include="Emu\Io\TopShotElite.cpp" />
     <ClCompile Include="Emu\Io\TopShotFearmaster.cpp" />
     <ClCompile Include="Emu\Io\Turntable.cpp" />
+    <ClCompile Include="Emu\Io\LogitechG27.cpp" />
+    <ClCompile Include="Emu\Io\LogitechG27Config.cpp" />
     <ClCompile Include="Emu\Io\usio.cpp" />
     <ClCompile Include="Emu\Audio\AudioBackend.cpp" />
     <ClCompile Include="Emu\Io\interception.cpp" />
@@ -104,8 +117,11 @@
     <ClCompile Include="Emu\NP\upnp_handler.cpp" />
     <ClCompile Include="Emu\perf_monitor.cpp" />
     <ClCompile Include="Emu\RSX\Common\texture_cache.cpp" />
+    <ClCompile Include="Emu\RSX\Common\texture_cache_types.cpp" />
     <ClCompile Include="Emu\RSX\Core\RSXContext.cpp" />
+    <ClCompile Include="Emu\RSX\Core\RSXDisplay.cpp" />
     <ClCompile Include="Emu\RSX\Core\RSXDrawCommands.cpp" />
+    <ClCompile Include="Emu\RSX\GSFrameBase.cpp" />
     <ClCompile Include="Emu\RSX\Host\MM.cpp" />
     <ClCompile Include="Emu\RSX\Host\RSXDMAWriter.cpp" />
     <ClCompile Include="Emu\RSX\NV47\FW\draw_call.cpp" />
@@ -136,9 +152,11 @@
     <ClCompile Include="Emu\RSX\Overlays\overlay_compile_notification.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_user_list_dialog.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_utils.cpp" />
+    <ClCompile Include="Emu\RSX\Overlays\overlay_video.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog_native.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\Trophies\overlay_trophy_list_dialog.cpp" />
+    <ClCompile Include="Emu\RSX\Program\FragmentProgramRegister.cpp" />
     <ClCompile Include="Emu\RSX\Program\ProgramStateCache.cpp" />
     <ClCompile Include="Emu\RSX\Program\program_util.cpp" />
     <ClCompile Include="Emu\RSX\Program\SPIRVCommon.cpp" />
@@ -166,8 +184,10 @@
     <ClCompile Include="Emu\NP\signaling_handler.cpp" />
     <ClCompile Include="Emu\NP\np_structs_extra.cpp" />
     <ClCompile Include="Emu\NP\rpcn_client.cpp" />
+    <ClCompile Include="Emu\NP\ip_address.cpp" />
     <ClCompile Include="Emu\vfs_config.cpp" />
     <ClCompile Include="Loader\disc.cpp" />
+    <ClCompile Include="util\emu_utils.cpp" />
     <ClCompile Include="util\serialization_ext.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -434,6 +454,7 @@
     <ClCompile Include="Emu\Io\usb_vfs.cpp" />
     <ClCompile Include="Emu\RSX\Capture\rsx_capture.cpp" />
     <ClCompile Include="Emu\RSX\Capture\rsx_replay.cpp" />
+    <ClCompile Include="Emu\RSX\Program\CgBinaryProgram.cpp" />
     <ClCompile Include="Emu\RSX\Program\CgBinaryFragmentProgram.cpp" />
     <ClCompile Include="Emu\RSX\Program\CgBinaryVertexProgram.cpp" />
     <ClCompile Include="Emu\RSX\Common\BufferUtils.cpp" />
@@ -515,7 +536,7 @@
     <ClCompile Include="Loader\TROPUSR.cpp" />
     <ClCompile Include="Loader\TRP.cpp" />
     <ClCompile Include="rpcs3_version.cpp" />
-    <ClCompile Include="stb_image.cpp" />
+    <ClCompile Include="Emu\stb_image.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -559,6 +580,9 @@
     <ClInclude Include="Emu\Io\camera_config.h" />
     <ClInclude Include="Emu\Io\camera_handler_base.h" />
     <ClInclude Include="Emu\Io\emulated_pad_config.h" />
+    <ClInclude Include="Emu\Io\evdev_gun_handler.h">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="Emu\Io\GameTablet.h" />
     <ClInclude Include="Emu\Io\gem_config.h" />
     <ClInclude Include="Emu\Io\GHLtar.h" />
@@ -587,6 +611,8 @@
     <ClInclude Include="Emu\Io\turntable_config.h" />
     <ClInclude Include="Emu\Io\usio.h" />
     <ClInclude Include="Emu\Io\usio_config.h" />
+    <ClInclude Include="Emu\Io\LogitechG27.h" />
+    <ClInclude Include="Emu\Io\LogitechG27Config.h" />
     <ClInclude Include="Emu\IPC_config.h" />
     <ClInclude Include="Emu\IPC_socket.h" />
     <ClInclude Include="Emu\localized_string.h" />
@@ -609,6 +635,7 @@
     <ClInclude Include="Emu\NP\np_structs_extra.h" />
     <ClInclude Include="Emu\NP\rpcn_client.h" />
     <ClInclude Include="Emu\NP\rpcn_config.h" />
+    <ClInclude Include="Emu\NP\ip_address.h" />
     <ClInclude Include="Emu\perf_monitor.hpp" />
     <ClInclude Include="Emu\RSX\color_utils.h" />
     <ClInclude Include="Emu\RSX\Common\bitfield.hpp" />
@@ -667,7 +694,9 @@
     <ClInclude Include="Emu\RSX\Overlays\overlay_manager.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_media_list_dialog.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_progress_bar.hpp" />
+    <ClInclude Include="Emu\RSX\Overlays\overlay_video.h" />
     <ClInclude Include="Emu\RSX\Overlays\Trophies\overlay_trophy_list_dialog.h" />
+    <ClInclude Include="Emu\RSX\Program\FragmentProgramRegister.h" />
     <ClInclude Include="Emu\RSX\Program\GLSLTypes.h" />
     <ClInclude Include="Emu\RSX\Program\ProgramStateCache.h" />
     <ClInclude Include="Emu\RSX\Program\program_util.h" />
@@ -744,6 +773,7 @@
     <ClInclude Include="..\Utilities\Timer.h" />
     <ClInclude Include="util\types.hpp" />
     <ClInclude Include="..\Utilities\version.h" />
+    <ClInclude Include="util\video_source.h" />
     <ClInclude Include="util\vm.hpp" />
     <ClInclude Include="util\asm.hpp" />
     <ClInclude Include="Crypto\aes.h" />
@@ -1021,6 +1051,14 @@
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXVertexPrologue.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\ShuffleBytes.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\VideoOutCalibrationPass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\ColorResolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\ColorUnresolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\DepthResolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\DepthStencilResolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\DepthStencilUnresolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\DepthUnresolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\StencilResolvePass.glsl" />
+    <None Include="Emu\RSX\Program\MSAA\StencilUnresolvePass.glsl" />
     <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ffx_a_flattened.inc" />
     <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ffx_fsr1_flattened.inc" />
     <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ubershader.glsl" />

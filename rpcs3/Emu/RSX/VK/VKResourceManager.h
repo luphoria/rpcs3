@@ -1,12 +1,11 @@
 #pragma once
-#include "vkutils/image.h"
+#include "Emu/RSX/VK/vkutils/sync.h"
 #include "vkutils/garbage_collector.h"
 #include "vkutils/query_pool.hpp"
 #include "vkutils/sampler.h"
 
 #include "Utilities/mutex.h"
 
-#include <unordered_map>
 #include <deque>
 #include <memory>
 
@@ -162,19 +161,17 @@ namespace vk
 		{
 			while (!m_eid_map.empty())
 			{
-				auto& scope = m_eid_map.front();
+				const auto& scope = m_eid_map.front();
 				if (scope.eid > eid)
 				{
 					break;
 				}
-				else
+
+				eid_scope_t tmp(0);
 				{
-					eid_scope_t tmp(0);
-					{
-						std::lock_guard lock(m_eid_map_lock);
-						m_eid_map.front().swap(tmp);
-						m_eid_map.pop_front();
-					}
+					std::lock_guard lock(m_eid_map_lock);
+					m_eid_map.front().swap(tmp);
+					m_eid_map.pop_front();
 				}
 			}
 		}

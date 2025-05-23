@@ -269,13 +269,8 @@ ps_move_tracker_dialog::~ps_move_tracker_dialog()
 		m_camera_handler->close_camera();
 	}
 
-	if (m_input_thread)
-	{
-		auto& thread = *m_input_thread;
-		thread = thread_state::aborting;
-		thread();
-		m_input_thread.reset();
-	}
+	// Join thread
+	m_input_thread.reset();
 }
 
 void ps_move_tracker_dialog::update_color(bool update_sliders)
@@ -360,9 +355,10 @@ void ps_move_tracker_dialog::update_saturation_threshold(bool update_slider)
 		ui->saturationThresholdSlider->setValue(saturation_threshold);
 	}
 }
+
 void ps_move_tracker_dialog::update_min_radius(bool update_slider)
 {
-	ui->minRadiusGb->setTitle(tr("Min Radius: %0 %").arg(g_cfg_move.min_radius));
+	ui->minRadiusGb->setTitle(tr("Min Radius: %0 %").arg(g_cfg_move.min_radius.get()));
 
 	if (update_slider)
 	{
@@ -372,7 +368,7 @@ void ps_move_tracker_dialog::update_min_radius(bool update_slider)
 
 void ps_move_tracker_dialog::update_max_radius(bool update_slider)
 {
-	ui->maxRadiusGb->setTitle(tr("Max Radius: %0 %").arg(g_cfg_move.max_radius));
+	ui->maxRadiusGb->setTitle(tr("Max Radius: %0 %").arg(g_cfg_move.max_radius.get()));
 
 	if (update_slider)
 	{

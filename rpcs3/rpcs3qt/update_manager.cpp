@@ -4,13 +4,12 @@
 #include "rpcs3_version.h"
 #include "downloader.h"
 #include "gui_settings.h"
-#include "Utilities/StrUtil.h"
 #include "Utilities/File.h"
 #include "Emu/System.h"
-#include "Emu/system_utils.hpp"
 #include "Crypto/utils.h"
 #include "util/logs.hpp"
 #include "util/types.hpp"
+#include "util/sysinfo.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -40,19 +39,10 @@
 #define PATH_MAX MAX_PATH
 #endif
 
+#include "Utilities/StrUtil.h"
 #else
 #include <unistd.h>
 #include <sys/stat.h>
-#endif
-
-#if defined(__APPLE__)
-// sysinfo_darwin.mm
-namespace Darwin_Version
-{
-	extern int getNSmajorVersion();
-	extern int getNSminorVersion();
-	extern int getNSpatchVersion();
-}
 #endif
 
 LOG_CHANNEL(update_log, "UPDATER");
@@ -116,26 +106,11 @@ void update_manager::check_for_updates(bool automatic, bool check_only, bool aut
 		Q_EMIT signal_update_available(result_json && !m_update_message.isEmpty());
 	});
 
-#if defined(__APPLE__)
-	const std::string url = fmt::format("https://update.rpcs3.net/"
-		"?api=v3"
-		"&c=%s"
-		"&os_type=macos"
-		"&os_arch="
-#if defined(ARCH_X64)
-		"x64"
-#elif defined(ARCH_ARM64)
-		"arm64"
-#endif
-		"&os_version=%i.%i.%i",
-		rpcs3::get_commit_and_hash().second,
-		Darwin_Version::getNSmajorVersion(),
-		Darwin_Version::getNSminorVersion(),
-		Darwin_Version::getNSpatchVersion());
-#else
-	const std::string url = "https://update.rpcs3.net/?api=v2&c=" + rpcs3::get_commit_and_hash().second;
-#endif
-	
+	const utils::OS_version os = utils::get_OS_version();
+
+	const std::string url = fmt::format("https://update.rpcs3.net/?api=v3&c=%s&os_type=%s&os_arch=%s&os_version=%i.%i.%i",
+		rpcs3::get_commit_and_hash().second, os.type, os.arch, os.version_major, os.version_minor, os.version_patch);
+
 	m_downloader->start(url, true, !automatic, tr("Checking For Updates"), true);
 }
 
@@ -199,11 +174,25 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 #endif
 
 	// Check that every bit of info we need is there
-	if (!latest[os].isObject() || !latest[os]["download"].isString() || !latest[os]["size"].isDouble() || !latest[os]["checksum"].isString() || !latest["version"].isString() ||
-	    !latest["datetime"].isString() ||
-	    (hash_found && (!current.isObject() || !current["version"].isString() || !current["datetime"].isString())))
+	const auto check_json = [](bool cond, std::string_view msg) -> bool
 	{
-		update_log.error("Some information seems unavailable");
+		if (cond) return true;
+		update_log.error("%s", msg);
+		return false;
+	};
+	if (!(check_json(latest[os].isObject(), fmt::format("Node 'latest_build: %s' not found", os)) &&
+	      check_json(latest[os]["download"].isString(), fmt::format("Node 'latest_build: %s: download' not found or not a string", os)) &&
+	      check_json(latest[os]["size"].isDouble(), fmt::format("Node 'latest_build: %s: size' not found or not a double", os)) &&
+	      check_json(latest[os]["checksum"].isString(), fmt::format("Node 'latest_build: %s: checksum' not found or not a string", os)) &&
+	      check_json(latest["version"].isString(), "Node 'latest_build: version' not found or not a string") &&
+	      check_json(latest["datetime"].isString(), "Node 'latest_build: datetime' not found or not a string")
+	     ) ||
+	     (hash_found && !(
+	      check_json(current.isObject(), "JSON doesn't contain current_build section") &&
+	      check_json(current["version"].isString(), "Node 'current_build: datetime' not found or not a string") &&
+	      check_json(current["datetime"].isString(), "Node 'current_build: version' not found or not a string")
+	     )))
+	{
 		return false;
 	}
 
@@ -510,16 +499,34 @@ bool update_manager::handle_rpcs3(const QByteArray& data, bool auto_accept)
 	UInt16 temp_u16[PATH_MAX];
 	u8 temp_u8[PATH_MAX];
 	const usz kInputBufSize = static_cast<usz>(1u << 18u);
-	const ISzAlloc g_Alloc     = {SzAlloc, SzFree};
+	const ISzAlloc g_Alloc = {SzAlloc, SzFree};
 
 	ISzAlloc allocImp     = g_Alloc;
 	ISzAlloc allocTempImp = g_Alloc;
 
-	if (InFile_Open(&archiveStream.file, tmpfile_path.c_str()))
+	const auto WRes_to_string = [](WRes res)
 	{
-		update_log.error("Failed to open temporary storage file: %s", tmpfile_path);
+#ifdef _WIN32
+		return fmt::format("0x%x='%s'", res, std::system_category().message(HRESULT_FROM_WIN32(res)));
+#else
+		return fmt::format("0x%x='%s'", res, strerror(res));
+#endif
+	};
+
+#ifdef _WIN32
+	const std::wstring tmpfile_path_w = utf8_to_wchar(tmpfile_path);
+	if (const WRes res = InFile_OpenW(&archiveStream.file, tmpfile_path_w.c_str()))
+	{
+		update_log.error("Failed to open temporary storage file: '%s' (error=%s)", tmpfile_path_w.c_str(), WRes_to_string(res));
 		return false;
 	}
+#else
+	if (const WRes res = InFile_Open(&archiveStream.file, tmpfile_path.c_str()))
+	{
+		update_log.error("Failed to open temporary storage file: '%s' (error=%s)", tmpfile_path, WRes_to_string(res));
+		return false;
+	}
+#endif
 
 	FileInStream_CreateVTable(&archiveStream);
 	LookToRead2_CreateVTable(&lookStream, False);
@@ -540,21 +547,14 @@ bool update_manager::handle_rpcs3(const QByteArray& data, bool auto_accept)
 	CrcGenerateTable();
 	SzArEx_Init(&db);
 
-	auto error_free7z = [&]()
+	const auto error_free7z = [&]()
 	{
 		SzArEx_Free(&db, &allocImp);
 		ISzAlloc_Free(&allocImp, lookStream.buf);
 
-		File_Close(&archiveStream.file);
-
-		switch (res)
-		{
-		case SZ_OK: break;
-		case SZ_ERROR_UNSUPPORTED: update_log.error("7z decoder doesn't support this archive"); break;
-		case SZ_ERROR_MEM: update_log.error("7z decoder failed to allocate memory"); break;
-		case SZ_ERROR_CRC: update_log.error("7z decoder CRC error"); break;
-		default: update_log.error("7z decoder error: %d", static_cast<u64>(res)); break;
-		}
+		const WRes res2 = File_Close(&archiveStream.file);
+		if (res2) update_log.warning("7z failed to close file (error=%s)", WRes_to_string(res2));
+		if (res) update_log.error("7z decoder error: %s", WRes_to_string(res));
 	};
 
 	if (res != SZ_OK)
@@ -598,7 +598,7 @@ bool update_manager::handle_rpcs3(const QByteArray& data, bool auto_accept)
 		const DWORD permissions = (attribs >> 16) & (S_IRWXU | S_IRWXG | S_IRWXO);
 		const bool is_symlink = (attribs & FILE_ATTRIBUTE_UNIX_EXTENSION) != 0 && S_ISLNK(attribs >> 16);
 #endif
-		const usz len        = SzArEx_GetFileNameUtf16(&db, i, nullptr);
+		const usz len = SzArEx_GetFileNameUtf16(&db, i, nullptr);
 
 		if (len >= PATH_MAX)
 		{
@@ -608,7 +608,7 @@ bool update_manager::handle_rpcs3(const QByteArray& data, bool auto_accept)
 		}
 
 		SzArEx_GetFileNameUtf16(&db, i, temp_u16);
-		memset(temp_u8, 0, sizeof(temp_u8));
+		std::memset(temp_u8, 0, sizeof(temp_u8));
 		// Simplistic conversion to UTF-8
 		for (usz index = 0; index < len; index++)
 		{

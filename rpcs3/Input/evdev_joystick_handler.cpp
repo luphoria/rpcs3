@@ -8,7 +8,6 @@
 #include "evdev_joystick_handler.h"
 #include "util/logs.hpp"
 
-#include <functional>
 #include <algorithm>
 #include <unistd.h>
 #include <fcntl.h>
@@ -18,6 +17,33 @@
 #include <cmath>
 
 LOG_CHANNEL(evdev_log, "evdev");
+
+bool positive_axis::load()
+{
+	if (fs::file cfg_file{ cfg_name, fs::read })
+	{
+		return from_string(cfg_file.to_string());
+	}
+
+	from_default();
+	return false;
+}
+
+void positive_axis::save() const
+{
+	fs::pending_file file(cfg_name);
+
+	if (file.file)
+	{
+		file.file.write(to_string());
+		file.commit();
+	}
+}
+
+bool positive_axis::exist() const
+{
+	return fs::is_file(cfg_name);
+}
 
 evdev_joystick_handler::evdev_joystick_handler()
     : PadHandlerBase(pad_handler::evdev)
@@ -34,6 +60,7 @@ evdev_joystick_handler::evdev_joystick_handler()
 	b_has_rumble    = true;
 	b_has_motion    = true;
 	b_has_deadzones = true;
+	b_has_orientation = true;
 
 	m_trigger_threshold = trigger_max / 2;
 	m_thumb_threshold   = thumb_max / 2;
@@ -84,6 +111,7 @@ void evdev_joystick_handler::init_config(cfg_pad* cfg)
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, NO_BUTTON);
 	cfg->analog_limiter_button.def = ::at32(button_list, NO_BUTTON);
+	cfg->orientation_reset_button.def = ::at32(button_list, NO_BUTTON);
 
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
@@ -109,7 +137,12 @@ bool evdev_joystick_handler::Init()
 	if (m_is_init)
 		return true;
 
-	m_pos_axis_config.load();
+	if (!m_pos_axis_config.load())
+	{
+		evdev_log.notice("positive_axis config missing. Using defaults");
+	}
+
+	evdev_log.notice("positive_axis config=\n%s", m_pos_axis_config.to_string());
 
 	if (!m_pos_axis_config.exist())
 		m_pos_axis_config.save();
@@ -782,7 +815,7 @@ std::shared_ptr<evdev_joystick_handler::EvdevDevice> evdev_joystick_handler::add
 					// Let's log axis information while we are in the settings in order to identify problems more easily.
 					for (const auto& [code, axis_name] : axis_list)
 					{
-						if (const input_absinfo *info = libevdev_get_abs_info(dev, code))
+						if (const input_absinfo* info = libevdev_get_abs_info(dev, code))
 						{
 							const char* code_name = libevdev_event_code_get_name(EV_ABS, code);
 							evdev_log.notice("Axis info for %s: %s (%s) => minimum=%d, maximum=%d, fuzz=%d, flat=%d, resolution=%d",
@@ -856,7 +889,7 @@ std::shared_ptr<evdev_joystick_handler::EvdevDevice> evdev_joystick_handler::add
 				// A device must not mix regular directional axes and accelerometer axes on the same event node.
 				for (const auto& [code, axis_name] : axis_list)
 				{
-					if (const input_absinfo *info = libevdev_get_abs_info(dev, code))
+					if (const input_absinfo* info = libevdev_get_abs_info(dev, code))
 					{
 						const bool is_accel = code == ABS_X || code == ABS_Y || code == ABS_Z;
 						const char* code_name = libevdev_event_code_get_name(EV_ABS, code);
@@ -1075,6 +1108,8 @@ void evdev_joystick_handler::get_extended_info(const pad_ensemble& binding)
 		}
 	}
 
+	set_raw_orientation(*pad);
+
 	if (ret < 0)
 	{
 		// -EAGAIN signifies no available events, not an actual *error*.
@@ -1277,10 +1312,8 @@ void evdev_joystick_handler::apply_pad_data(const pad_ensemble& binding)
 		return;
 
 	// Handle vibration
-	const int idx_l      = cfg->switch_vibration_motors ? 1 : 0;
-	const int idx_s      = cfg->switch_vibration_motors ? 0 : 1;
-	const u8 force_large = cfg->enable_vibration_motor_large ? pad->m_vibrateMotors[idx_l].m_value * 257 : 0;
-	const u8 force_small = cfg->enable_vibration_motor_small ? pad->m_vibrateMotors[idx_s].m_value * 257 : 0;
+	const u8 force_large = cfg->get_large_motor_speed(pad->m_vibrateMotors);
+	const u8 force_small = cfg->get_small_motor_speed(pad->m_vibrateMotors);
 	SetRumble(evdev_device, force_large, force_small);
 }
 
@@ -1390,6 +1423,12 @@ bool evdev_joystick_handler::bindPadToDevice(std::shared_ptr<Pad> pad)
 	{
 		pad->m_buttons.emplace_back(special_button_offset, find_buttons(cfg->analog_limiter_button), special_button_value::analog_limiter);
 		pad->m_analog_limiter_button_index = static_cast<s32>(pad->m_buttons.size()) - 1;
+	}
+
+	if (b_has_orientation)
+	{
+		pad->m_buttons.emplace_back(special_button_offset, find_buttons(cfg->orientation_reset_button), special_button_value::orientation_reset);
+		pad->m_orientation_reset_button_index = static_cast<s32>(pad->m_buttons.size()) - 1;
 	}
 
 	pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2,find_buttons(cfg->triangle), CELL_PAD_CTRL_TRIANGLE);

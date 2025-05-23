@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Emu/System.h"
+#include "Emu/Cell/timers.hpp"
 #include "Emu/Cell/lv2/sys_usbd.h"
 #include "Emu/Io/usb_device.h"
 #include "Utilities/StrUtil.h"
@@ -306,16 +307,11 @@ void usb_device_emulated::control_transfer(u8 bmRequestType, u8 bRequest, u16 wV
 	}
 }
 
-// Temporarily
-#ifndef _MSC_VER
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif
-
-void usb_device_emulated::interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer)
+void usb_device_emulated::interrupt_transfer(u32 /*buf_size*/, u8* /*buf*/, u32 /*endpoint*/, UsbTransfer* /*transfer*/)
 {
 }
 
-void usb_device_emulated::isochronous_transfer(UsbTransfer* transfer)
+void usb_device_emulated::isochronous_transfer(UsbTransfer* /*transfer*/)
 {
 }
 

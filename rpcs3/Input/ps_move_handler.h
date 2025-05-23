@@ -2,15 +2,6 @@
 
 #include "hid_pad_handler.h"
 
-#ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#endif
-#include "3rdparty/fusion/fusion/Fusion/Fusion.h"
-#ifndef _MSC_VER
-#pragma GCC diagnostic pop
-#endif
-
 #include <unordered_map>
 
 namespace reports
@@ -146,12 +137,6 @@ public:
 	u32 external_device_id = 0;
 	ps_move_calibration calibration{};
 
-	FusionAhrs ahrs {};               // Used to calculate quaternions from sensor data
-	u64 last_ahrs_update_time_us = 0; // Last ahrs update
-
-	void update_orientation(ps_move_data& move_data);
-	void reset_orientation();
-
 	const reports::ps_move_input_report_common& input_report_common() const;
 };
 
@@ -204,7 +189,7 @@ private:
 #endif
 
 	DataStatus get_data(ps_move_device* device) override;
-	void check_add_device(hid_device* hidDevice, std::string_view path, std::wstring_view wide_serial) override;
+	void check_add_device(hid_device* hidDevice, hid_enumerated_device_view path, std::wstring_view wide_serial) override;
 	int send_output_report(ps_move_device* device) override;
 
 	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;

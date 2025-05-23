@@ -1,9 +1,9 @@
 #include "log_frame.h"
 #include "qt_utils.h"
 #include "gui_settings.h"
+#include "hex_validator.h"
+#include "memory_viewer_panel.h"
 
-#include "rpcs3_version.h"
-#include "Utilities/mutex.h"
 #include "Utilities/lockless.h"
 #include "util/asm.hpp"
 
@@ -14,7 +14,6 @@
 #include <QTimer>
 #include <QStringBuilder>
 
-#include <sstream>
 #include <deque>
 #include <mutex>
 
@@ -51,7 +50,7 @@ struct gui_listener : logs::listener
 	{
 	}
 
-	void log(u64 stamp, const logs::message& msg, const std::string& prefix, const std::string& text) override
+	void log(u64 stamp, const logs::message& msg, std::string_view prefix, std::string_view text) override
 	{
 		Q_UNUSED(stamp)
 
@@ -157,7 +156,7 @@ log_frame::log_frame(std::shared_ptr<gui_settings> _gui_settings, QWidget* paren
 	setWidget(m_tabWidget);
 
 	// Open or create TTY.log
-	m_tty_file.open(fs::get_cache_dir() + "TTY.log", fs::read + fs::create);
+	m_tty_file.open(fs::get_log_dir() + "TTY.log", fs::read + fs::create);
 
 	CreateAndConnectActions();
 	LoadSettings();
@@ -251,6 +250,21 @@ void log_frame::CreateAndConnectActions()
 	{
 		QPlainTextEdit* pte = (m_tabWidget->currentIndex() == 1 ? m_tty : m_log);
 		Q_EMIT PerformGoToOnDebugger(pte->textCursor().selectedText(), true);
+	});
+
+	m_perform_show_in_mem_viewer = new QAction(tr("Show in Memory Viewer"), this);
+	connect(m_perform_show_in_mem_viewer, &QAction::triggered, this, [this]()
+	{
+		const QPlainTextEdit* pte = (m_tabWidget->currentIndex() == 1 ? m_tty : m_log);
+		const QString selected = pte->textCursor().selectedText();
+		u64 pc = 0;
+		if (!parse_hex_qstring(selected, &pc))
+		{
+			QMessageBox::critical(this, tr("Invalid Hex"), tr("“%0” is not a valid 32-bit hex value.").arg(selected));
+			return;
+		}
+
+		memory_viewer_panel::ShowAtPC(static_cast<u32>(pc));
 	});
 
 	m_perform_goto_thread_on_debugger = new QAction(tr("Show Thread On The Debugger"), this);
@@ -357,13 +371,16 @@ void log_frame::CreateAndConnectActions()
 		menu->addAction(m_clear_act);
 		menu->addAction(m_perform_goto_on_debugger);
 		menu->addAction(m_perform_goto_thread_on_debugger);
+		menu->addAction(m_perform_show_in_mem_viewer);
 
 		std::shared_ptr<bool> goto_signal_accepted = std::make_shared<bool>(false);
 		Q_EMIT PerformGoToOnDebugger("", true, true, goto_signal_accepted);
 		m_perform_goto_on_debugger->setEnabled(m_log->textCursor().hasSelection() && *goto_signal_accepted);
 		m_perform_goto_thread_on_debugger->setEnabled(m_log->textCursor().hasSelection() && *goto_signal_accepted);
+		m_perform_show_in_mem_viewer->setEnabled(m_log->textCursor().hasSelection() && *goto_signal_accepted);
 		m_perform_goto_on_debugger->setToolTip(tr("Jump to the selected hexadecimal address from the log text on the debugger."));
-		m_perform_goto_thread_on_debugger->setToolTip(tr("Show the thread that corresponds to the thread ID from lthe log text on the debugger."));
+		m_perform_goto_thread_on_debugger->setToolTip(tr("Show the thread that corresponds to the thread ID from the log text on the debugger."));
+		m_perform_show_in_mem_viewer->setToolTip(tr("Jump to the selected hexadecimal address from the log text on the memory viewer."));
 
 		menu->addSeparator();
 		menu->addActions(m_log_level_acts->actions());
@@ -379,11 +396,14 @@ void log_frame::CreateAndConnectActions()
 		QMenu* menu = m_tty->createStandardContextMenu();
 		menu->addAction(m_clear_tty_act);
 		menu->addAction(m_perform_goto_on_debugger);
+		menu->addAction(m_perform_show_in_mem_viewer);
 
 		std::shared_ptr<bool> goto_signal_accepted = std::make_shared<bool>(false);
 		Q_EMIT PerformGoToOnDebugger("", false, true, goto_signal_accepted);
 		m_perform_goto_on_debugger->setEnabled(m_tty->textCursor().hasSelection() && *goto_signal_accepted);
+		m_perform_show_in_mem_viewer->setEnabled(m_tty->textCursor().hasSelection() && *goto_signal_accepted);
 		m_perform_goto_on_debugger->setToolTip(tr("Jump to the selected hexadecimal address from the TTY text on the debugger."));
+		m_perform_show_in_mem_viewer->setToolTip(tr("Jump to the selected hexadecimal address from the TTY text on the memory viewer."));
 
 		menu->addSeparator();
 		menu->addAction(m_tty_act);

@@ -1,15 +1,15 @@
-#include "Utilities/mutex.h"
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/Memory/vm.h"
 
 #include "memory_viewer_panel.h"
+#include "hex_validator.h"
 
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/CPU/CPUDisAsm.h"
-#include "Emu/Cell/SPUDisAsm.h"
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/RSX/rsx_utils.h"
 #include "Emu/IdManager.h"
+#include "Emu/System.h"
 #include <QVBoxLayout>
 #include <QPushButton>
 #include <QSpinBox>
@@ -26,7 +26,7 @@
 
 #include "util/logs.hpp"
 #include "util/asm.hpp"
-#include "util/vm.hpp"
+#include "debugger_frame.h"
 
 LOG_CHANNEL(gui_log, "GUI");
 
@@ -35,7 +35,7 @@ constexpr auto qstr = QString::fromStdString;
 memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDisAsm> disasm, u32 addr, std::function<cpu_thread*()> func)
 	: QDialog(parent)
 	, m_addr(addr)
-	, m_get_cpu(std::move(func))
+	, m_get_cpu(func ? std::move(func) : std::function<cpu_thread*()>(FN(nullptr)))
 	, m_type([&]()
 	{
 		const auto cpu = m_get_cpu();
@@ -97,10 +97,10 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 	m_addr_line = new QLineEdit(this);
 	m_addr_line->setPlaceholderText("00000000");
 	m_addr_line->setFont(mono);
-	m_addr_line->setMaxLength(18);
-	m_addr_line->setFixedWidth(75);
+	m_addr_line->setValidator(new HexValidator(m_addr_line));
+	m_addr_line->setFixedWidth(100);
 	m_addr_line->setFocus();
-	m_addr_line->setValidator(new QRegularExpressionValidator(QRegularExpression(m_type == thread_class::spu ? "^(0[xX])?0*[a-fA-F0-9]{0,5}$" : "^(0[xX])?0*[a-fA-F0-9]{0,8}$"), this));
+	m_addr_line->setAlignment(Qt::AlignCenter);
 	hbox_tools_mem_addr->addWidget(m_addr_line);
 	tools_mem_addr->setLayout(hbox_tools_mem_addr);
 
@@ -122,7 +122,7 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 
 		QString textFromValue(int value) const override
 		{
-			return tr("%0").arg(1 << value);
+			return QString("%0").arg(1 << value);
 		}
 	};
 
@@ -290,7 +290,8 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 	QGroupBox* group_search = new QGroupBox(tr("Memory Search"), this);
 	QPushButton* button_collapse_viewer = new QPushButton(reinterpret_cast<const char*>(u8"Ʌ"), group_search);
 	button_collapse_viewer->setFixedWidth(QLabel(button_collapse_viewer->text()).sizeHint().width() * 3);
-
+	button_collapse_viewer->setAutoDefault(false);
+	
 	m_search_line = new QLineEdit(group_search);
 	m_search_line->setFixedWidth(QLabel(QString("This is the very length of the lineedit due to hidpi reasons.").chopped(4)).sizeHint().width());
 	m_search_line->setPlaceholderText(tr("Search..."));
@@ -427,8 +428,7 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 	connect(m_addr_line, &QLineEdit::returnPressed, [this]()
 	{
 		bool ok = false;
-		const QString text = m_addr_line->text();
-		const u32 addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16);
+		const u32 addr = normalize_hex_qstring(m_addr_line->text()).toULong(&ok, 16);
 		if (ok) m_addr = addr;
 
 		scroll(0); // Refresh
@@ -590,6 +590,24 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 		}
 
 		idm::remove_verify<memory_viewer_handle>(id, handle_ptr);
+	});
+
+	if (!g_fxo->try_get<memory_viewer_fxo>())
+	{
+		g_fxo->init<memory_viewer_fxo>();
+	}
+
+	auto& fxo = g_fxo->get<memory_viewer_fxo>();
+	fxo.last_opened[m_type] = this;
+
+	connect(this, &memory_viewer_panel::destroyed, this, [this]()
+	{
+		if (auto fxo = g_fxo->try_get<memory_viewer_fxo>())
+		{
+			auto it = fxo->last_opened.find(m_type);
+			if (it != fxo->last_opened.end() && it->second == this)
+				fxo->last_opened.erase(it);
+		}
 	});
 }
 
@@ -1245,4 +1263,44 @@ void memory_viewer_panel::ShowImage(QWidget* parent, u32 addr, color_format form
 		// sizeHint() evaluates properly after events have been processed
 		f_image_viewer->setFixedSize(f_image_viewer->sizeHint());
 	});
+}
+
+void memory_viewer_panel::ShowAtPC(u32 pc, std::function<cpu_thread*()> func)
+{
+	if (Emu.IsStopped())
+		return;
+
+	cpu_thread* cpu = func ? func() : nullptr;
+	thread_class type = cpu ? cpu->get_class() : thread_class::ppu;
+
+	if (type == thread_class::spu)
+	{
+		idm::make<memory_viewer_handle>(nullptr, nullptr, pc, std::move(func));
+		return;
+	}
+
+	if (const auto* fxo = g_fxo->try_get<memory_viewer_fxo>())
+	{
+		auto it = fxo->last_opened.find(type);
+
+		if (it != fxo->last_opened.end())
+		{
+			memory_viewer_panel* panel = it->second;
+
+			if (panel)
+			{
+				panel->SetPC(pc);
+				panel->scroll(0);
+
+				if (!panel->isVisible())
+					panel->show();
+				
+				panel->raise();
+
+				return;
+			}
+		}
+	}
+
+	idm::make<memory_viewer_handle>(nullptr, nullptr, pc, std::move(func));
 }

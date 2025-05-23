@@ -8,7 +8,6 @@
 
 #include "Emu/System.h"
 #include "Emu/system_config.h"
-#include "Emu/vfs_config.h"
 #include "Emu/system_utils.hpp"
 #include "Emu/Cell/Modules/cellSysutil.h"
 #include "Emu/Io/Keyboard.h"
@@ -93,7 +92,7 @@ void emu_settings::LoadSettings(const std::string& title_id, bool create_config_
 	m_title_id = title_id;
 
 	// Create config path if necessary
-	fs::create_path(title_id.empty() ? fs::get_config_dir() : rpcs3::utils::get_custom_config_dir());
+	fs::create_path(title_id.empty() ? fs::get_config_dir(true) : rpcs3::utils::get_custom_config_dir());
 
 	// Load default config
 	auto [default_config, default_error] = yaml_load(g_cfg_defaults);
@@ -113,7 +112,7 @@ void emu_settings::LoadSettings(const std::string& title_id, bool create_config_
 	if (create_config_from_global)
 	{
 		// Add global config
-		const std::string global_config_path = fs::get_config_dir() + "config.yml";
+		const std::string global_config_path = fs::get_config_dir(true) + "config.yml";
 		fs::g_tls_error = fs::error::ok;
 		fs::file config(global_config_path, fs::read + fs::create);
 		auto [global_config, global_error] = yaml_load(config ? config.to_string() : "");
@@ -1065,7 +1064,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		{
 		case output_scaling_mode::nearest: return tr("Nearest", "Output Scaling Mode");
 		case output_scaling_mode::bilinear: return tr("Bilinear", "Output Scaling Mode");
-		case output_scaling_mode::fsr: return tr("FidelityFX Super Resolution", "Output Scaling Mode");
+		case output_scaling_mode::fsr: return tr("FidelityFX Super Resolution 1", "Output Scaling Mode");
 		}
 		break;
 	case emu_settings_type::AudioRenderer:

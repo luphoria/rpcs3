@@ -1,11 +1,13 @@
 #!/bin/sh -ex
 
+# First let's see print some info about our caches
+"$(cygpath -u "$CCACHE_BIN_DIR")"/ccache.exe --show-stats -v
+
 # BUILD_blablabla is Azure specific, so we wrap it for portability
 ARTIFACT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY"
 
 # Remove unecessary files
 rm -f ./bin/rpcs3.exp ./bin/rpcs3.lib ./bin/rpcs3.pdb ./bin/vc_redist.x64.exe
-rm -rf ./bin/git
 
 # Prepare compatibility and SDL database for packaging
 mkdir ./bin/config

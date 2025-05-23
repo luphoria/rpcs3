@@ -10,11 +10,6 @@ public:
 		b_has_pressure_intensity_button = false;
 	}
 
-	bool Init() override
-	{
-		return true;
-	}
-
 	void init_config(cfg_pad* cfg) override
 	{
 		if (!cfg) return;
@@ -48,6 +43,7 @@ public:
 
 		cfg->pressure_intensity_button.def = "";
 		cfg->analog_limiter_button.def = "";
+		cfg->orientation_reset_button.def = "";
 
 		// Apply defaults
 		cfg->from_default();

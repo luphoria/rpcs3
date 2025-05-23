@@ -1,15 +1,15 @@
 #pragma once
 #include "Emu/RSX/GSRender.h"
-#include "GLHelpers.h"
-#include "GLTexture.h"
 #include "GLTextureCache.h"
 #include "GLRenderTargets.h"
 #include "GLProgramBuffer.h"
 #include "GLOverlays.h"
 #include "GLShaderInterpreter.h"
+#include "Emu/RSX/rsx_cache.h"
 
 #include <optional>
 #include <unordered_map>
+#include <thread>
 
 #include "glutils/ring_buffer.h"
 #include "upscalers/upscaling.h"
@@ -78,6 +78,7 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	gl::sampler_state m_vs_sampler_states[rsx::limits::vertex_textures_count];           // Vertex textures
 
 	gl::glsl::program *m_program = nullptr;
+	gl::glsl::program* m_prev_program = nullptr;
 	const GLFragmentProgram *m_fragment_prog = nullptr;
 	const GLVertexProgram *m_vertex_prog = nullptr;
 
@@ -104,6 +105,7 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	std::unique_ptr<gl::ring_buffer> m_vertex_instructions_buffer;
 	std::unique_ptr<gl::ring_buffer> m_fragment_instructions_buffer;
 	std::unique_ptr<gl::ring_buffer> m_raster_env_ring_buffer;
+	std::unique_ptr<gl::ring_buffer> m_instancing_ring_buffer;
 
 	// Identity buffer used to fix broken gl_VertexID on ATI stack
 	std::unique_ptr<gl::buffer> m_identity_index_buffer;
@@ -116,6 +118,7 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 
 	GLint m_min_texbuffer_alignment = 256;
 	GLint m_uniform_buffer_offset_align = 256;
+	GLint m_min_ssbo_alignment = 256;
 	GLint m_max_texbuffer_size = 65536;
 
 	bool manually_flush_ring_buffers = false;
@@ -142,8 +145,6 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 
 	shared_mutex m_sampler_mutex;
 	atomic_t<bool> m_samplers_dirty = {true};
-	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count> fs_sampler_state = {};
-	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::vertex_textures_count> vs_sampler_state = {};
 	std::unordered_map<GLenum, std::unique_ptr<gl::texture>> m_null_textures;
 	rsx::simple_array<u8> m_scratch_buffer;
 
@@ -159,6 +160,7 @@ public:
 
 	GLGSRender(utils::serial* ar) noexcept;
 	GLGSRender() noexcept : GLGSRender(nullptr) {}
+	virtual ~GLGSRender();
 
 private:
 
@@ -204,6 +206,9 @@ public:
 
 	// GRAPH backend
 	void patch_transform_constants(rsx::context* ctx, u32 index, u32 count) override;
+
+	// Misc
+	bool is_current_program_interpreted() const override;
 
 protected:
 	void clear_surface(u32 arg) override;

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "video_provider.h"
 #include "Emu/RSX/Overlays/overlay_message.h"
+#include "Emu/Cell/timers.hpp"
 
 extern "C"
 {
@@ -161,7 +162,7 @@ namespace utils
 		}
 	}
 
-	void video_provider::present_samples(u8* buf, u32 sample_count, u16 channels)
+	void video_provider::present_samples(const u8* buf, u32 sample_count, u16 channels)
 	{
 		if (!buf || !sample_count || !channels || !m_active)
 		{

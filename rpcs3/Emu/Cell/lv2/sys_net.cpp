@@ -15,7 +15,6 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #endif
-#include <errno.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -24,7 +23,6 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <poll.h>
 #ifdef __clang__
 #pragma GCC diagnostic pop
@@ -33,9 +31,7 @@
 
 #include "Emu/NP/np_handler.h"
 #include "Emu/NP/np_helpers.h"
-#include "Emu/NP/np_dnshook.h"
-
-#include <chrono>
+#include "Emu/Cell/timers.hpp"
 #include <shared_mutex>
 
 #include "sys_net/network_context.h"
@@ -293,7 +289,7 @@ std::function<void(void*)> lv2_socket::load(utils::serial& ar)
 		sock_lv2->bind(sock_lv2->last_bound_addr);
 	}
 
-	return [ptr = sock_lv2](void* storage) { *static_cast<shared_ptr<lv2_socket>*>(storage) = ptr; };;
+	return [ptr = sock_lv2](void* storage) { *static_cast<atomic_ptr<lv2_socket>*>(storage) = ptr; };;
 }
 
 void lv2_socket::save(utils::serial& ar, bool save_only_this_class)

@@ -10,8 +10,6 @@
 #include "Emu/Cell/Modules/cellSysutil.h"
 
 #include "Emu/NP/rpcn_client.h"
-#include "Emu/NP/generated/np2_structs_generated.h"
-#include "Emu/NP/signaling_handler.h"
 #include "Emu/NP/np_allocator.h"
 #include "Emu/NP/np_cache.h"
 #include "Emu/NP/np_gui_cache.h"
@@ -295,79 +293,78 @@ namespace np
 		bool error_and_disconnect(const std::string& error_msg);
 
 		// Notification handlers
-		void notif_user_joined_room(std::vector<u8>& data);
-		void notif_user_left_room(std::vector<u8>& data);
-		void notif_room_destroyed(std::vector<u8>& data);
-		void notif_updated_room_data_internal(std::vector<u8>& data);
-		void notif_updated_room_member_data_internal(std::vector<u8>& data);
-		void notif_p2p_connect(std::vector<u8>& data);
-		void notif_signaling_info(std::vector<u8>& data);
-		void notif_room_message_received(std::vector<u8>& data);
+		void notif_user_joined_room(vec_stream& noti);
+		void notif_user_left_room(vec_stream& noti);
+		void notif_room_destroyed(vec_stream& noti);
+		void notif_updated_room_data_internal(vec_stream& noti);
+		void notif_updated_room_member_data_internal(vec_stream& noti);
+		void notif_signaling_helper(vec_stream& noti);
+		void notif_room_message_received(vec_stream& noti);
 
-		void generic_gui_notification_handler(std::vector<u8>& data, std::string_view name, s32 notification_type);
+		void generic_gui_notification_handler(vec_stream& noti, std::string_view name, s32 notification_type);
 
-		void notif_member_joined_room_gui(std::vector<u8>& data);
-		void notif_member_left_room_gui(std::vector<u8>& data);
-		void notif_room_disappeared_gui(std::vector<u8>& data);
-		void notif_room_owner_changed_gui(std::vector<u8>& data);
-		void notif_user_kicked_gui(std::vector<u8>& data);
-		void notif_quickmatch_complete_gui(std::vector<u8>& data);
+		void notif_member_joined_room_gui(vec_stream& noti);
+		void notif_member_left_room_gui(vec_stream& noti);
+		void notif_room_disappeared_gui(vec_stream& noti);
+		void notif_room_owner_changed_gui(vec_stream& noti);
+		void notif_user_kicked_gui(vec_stream& noti);
+		void notif_quickmatch_complete_gui(vec_stream& noti);
 
 		// Reply handlers
-		bool reply_get_world_list(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_create_join_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_join_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_leave_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_search_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roomdata_external_list(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roomdata_external(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roomdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roomdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roommemberdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roommemberdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_userinfo(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_ping_info(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_send_room_message(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_req_sign_infos(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_req_ticket(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_board_infos(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_record_score(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_record_score_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_range(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_friends(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_npid(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_set_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multiuser_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_friends_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_add_and_get_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_try_and_set_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_delete_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_set_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multislot_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multiuser_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_friends_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_delete_multislot_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_create_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_join_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_leave_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_list_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_room_search_flag_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_search_flag_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_room_info_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_info_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_quickmatch_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_searchjoin_gui(u32 req_id, std::vector<u8>& reply_data);
+		void reply_get_world_list(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_create_join_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_join_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_leave_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_search_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_roomdata_external_list(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_roomdata_external(u32 req_id, rpcn::ErrorType error);
+		void reply_get_roomdata_internal(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_roomdata_internal(u32 req_id, rpcn::ErrorType error);
+		void reply_set_roommemberdata_internal(u32 req_id, rpcn::ErrorType error);
+		void reply_get_roommemberdata_internal(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_userinfo(u32 req_id, rpcn::ErrorType error);
+		void reply_get_ping_info(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_send_room_message(u32 req_id, rpcn::ErrorType error);
+		void reply_req_sign_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_req_ticket(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_board_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_record_score(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_record_score_data(u32 req_id, rpcn::ErrorType error);
+		void reply_get_score_data(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_range(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_friends(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_npid(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_set_multislot_variable(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_get_multislot_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multiuser_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_friends_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_add_and_get_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_try_and_set_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_delete_multislot_variable(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_set_data(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_get_data(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multislot_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multiuser_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_friends_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_delete_multislot_data(u32 req_id, rpcn::ErrorType error);
+		void reply_create_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_join_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_leave_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_room_list_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_room_search_flag_gui(u32 req_id, rpcn::ErrorType error);
+		void reply_get_room_search_flag_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_room_info_gui(u32 req_id, rpcn::ErrorType error);
+		void reply_get_room_info_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_quickmatch_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_searchjoin_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 
 		// Helper functions
 		std::pair<bool, bool> get_match2_context_options(u32 ctx_id);
-		bool handle_GetScoreResponse(u32 req_id, std::vector<u8>& reply_data, bool simple_result = false);
-		bool handle_tus_no_data(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusVarResponse(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusVariable(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusDataStatusResponse(u32 req_id, std::vector<u8>& reply_data);
+		void handle_GetScoreResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply, bool simple_result = false);
+		void handle_tus_no_data(u32 req_id, rpcn::ErrorType error);
+		void handle_TusVarResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void handle_TusVariable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void handle_TusDataStatusResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 
 		struct callback_info
 		{
@@ -512,6 +509,7 @@ namespace np
 			std::string pr_status;
 			std::string pr_comment;
 			std::vector<u8> pr_data;
+			atomic_t<bool> advertised = false;
 		} presence_self;
 
 		player_history& get_player_and_set_timestamp(const SceNpId& npid, u64 timestamp);

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "util/endian.hpp"
 
 // Error codes
 enum CellAudioInError : u32
@@ -76,7 +75,7 @@ struct CellAudioInDeviceInfo
 	u8 reserved[12];
 	be_t<u64> deviceId;
 	be_t<u64> type;
-	char name[64];
+	char name[64]; // Not necessarily null terminated!
 	CellAudioInSoundMode availableModes[16];
 };
 

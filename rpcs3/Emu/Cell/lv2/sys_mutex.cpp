@@ -1,7 +1,6 @@
 #include "stdafx.h"
 
 #include "Emu/IdManager.h"
-#include "Emu/IPC.h"
 
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
@@ -27,7 +26,7 @@ lv2_mutex::lv2_mutex(utils::serial& ar)
 
 std::function<void(void*)> lv2_mutex::load(utils::serial& ar)
 {
-	return load_func(make_shared<lv2_mutex>(ar));
+	return load_func(make_shared<lv2_mutex>(stx::exact_t<utils::serial&>(ar)));
 }
 
 void lv2_mutex::save(utils::serial& ar)

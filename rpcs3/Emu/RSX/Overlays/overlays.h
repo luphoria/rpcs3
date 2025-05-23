@@ -2,10 +2,8 @@
 #include "overlay_animation.h"
 #include "overlay_controls.h"
 
-#include "Emu/IdManager.h"
 #include "Emu/Io/pad_types.h"
 
-#include "Utilities/mutex.h"
 #include "Utilities/Timer.h"
 
 #include "../Common/bitfield.hpp"
@@ -122,8 +120,6 @@ namespace rsx
 
 			bool is_detached() const { return m_input_thread_detached; }
 			void detach_input() { m_input_thread_detached.store(true); }
-
-			void update(u64 /*timestamp_us*/) override {}
 
 			compiled_resource get_compiled() override = 0;
 

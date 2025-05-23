@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "rb3drums_config.h"
-#include <charconv>
 
 LOG_CHANNEL(cfg_log, "CFG");
 
@@ -8,13 +7,7 @@ cfg_rb3drums g_cfg_rb3drums;
 
 cfg_rb3drums::cfg_rb3drums()
 	: cfg::node()
-#ifdef _WIN32
-	  ,
-	  path(fs::get_config_dir() + "config/rb3drums.yml")
-#else
-	  ,
-	  path(fs::get_config_dir() + "rb3drums.yml")
-#endif
+	, path(fs::get_config_dir(true) + "rb3drums.yml")
 {
 }
 

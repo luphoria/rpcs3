@@ -6,8 +6,6 @@
 #include "rsx_decode.h"
 #include "RSXTexture.h"
 #include "rsx_vertex_data.h"
-#include "Common/simple_array.hpp"
-#include "Emu/Cell/timers.hpp"
 #include "Program/program_util.h"
 
 #include "NV47/FW/draw_call.hpp"
@@ -705,6 +703,11 @@ namespace rsx
 		user_clip_plane_op clip_plane_5_enabled() const
 		{
 			return decode<NV4097_SET_USER_CLIP_PLANE_CONTROL>().clip_plane5();
+		}
+
+		u32 clip_planes_mask() const
+		{
+			return registers[NV4097_SET_USER_CLIP_PLANE_CONTROL];
 		}
 
 		front_face front_face_mode() const

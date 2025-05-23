@@ -5,10 +5,6 @@
 #include "util/shared_ptr.hpp"
 
 #include <string>
-#include <concepts>
-
-#include "mutex.h"
-#include "lockless.h"
 
 // Hardware core layout
 enum class native_core_arrangement : u32
@@ -33,7 +29,8 @@ enum class thread_state : u32
 	aborting = 1, // The thread has been joined in the destructor or explicitly aborted
 	errored = 2, // Set after the emergency_exit call
 	finished = 3,  // Final state, always set at the end of thread execution
-	mask = 3
+	mask = 3,
+	destroying_context = 7, // Special value assigned to destroy data explicitly before the destructor
 };
 
 template <class Context>
@@ -702,14 +699,17 @@ public:
 			thread::m_sync.notify_all();
 		}
 
-		if (s == thread_state::finished)
+		if (s == thread_state::finished || s == thread_state::destroying_context)
 		{
 			// This participates in emulation stopping, use destruction-alike semantics
 			thread::join(true);
+		}
 
+		if (s == thread_state::destroying_context)
+		{
 			if constexpr (std::is_assignable_v<Context&, thread_state>)
 			{
-				static_cast<Context&>(*this) = thread_state::finished;
+				static_cast<Context&>(*this) = thread_state::destroying_context;
 			}
 		}
 
@@ -765,7 +765,7 @@ public:
 		}
 
 		// Move the context (if movable)
-		new (static_cast<void*>(m_threads + m_count - 1)) Thread(std::string(name) + std::to_string(m_count - 1), std::forward<Context>(f));
+		new (static_cast<void*>(m_threads + m_count - 1)) Thread(std::string(name) + std::to_string(m_count), std::forward<Context>(f));
 	}
 
 	// Constructor with a function performed before adding more threads

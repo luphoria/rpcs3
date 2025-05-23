@@ -1,9 +1,7 @@
 #include "stdafx.h"
 #include "shortcut_utils.h"
 #include "qt_utils.h"
-#include "Emu/system_utils.hpp"
 #include "Emu/VFS.h"
-#include "Emu/vfs_config.h"
 #include "Utilities/File.h"
 #include "Utilities/StrUtil.h"
 
@@ -16,6 +14,9 @@
 #include <objidl.h>
 #include <shlguid.h>
 #include <comdef.h>
+
+#include "Emu/system_utils.hpp"
+#include <wrl/client.h>
 #else
 #include <sys/stat.h>
 #include <errno.h>
@@ -142,19 +143,17 @@ namespace gui::utils
 			return false;
 		}
 
-		IShellLink* pShellLink = nullptr;
-		IPersistFile* pPersistFile = nullptr;
+		Microsoft::WRL::ComPtr<IShellLink> pShellLink;
+		Microsoft::WRL::ComPtr<IPersistFile> pPersistFile;
 
 		const auto cleanup = [&](bool return_value, const std::string& fail_reason) -> bool
 		{
 			if (!return_value) sys_log.error("Failed to create shortcut: %s", fail_reason);
-			if (pPersistFile) pPersistFile->Release();
-			if (pShellLink) pShellLink->Release();
 			CoUninitialize();
 			return return_value;
 		};
 
-		res = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pShellLink));
+		res = CoCreateInstance(__uuidof(ShellLink), NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pShellLink));
 		if (FAILED(res))
 			return cleanup(false, "CoCreateInstance failed");
 
@@ -200,7 +199,7 @@ namespace gui::utils
 		}
 
 		// Use the IPersistFile object to save the shell link
-		res = pShellLink->QueryInterface(IID_PPV_ARGS(&pPersistFile));
+		res = pShellLink.As(&pPersistFile);
 		if (FAILED(res))
 			return cleanup(false, fmt::format("QueryInterface failed (%s)", str_error(res)));
 

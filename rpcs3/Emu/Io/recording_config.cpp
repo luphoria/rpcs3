@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "recording_config.h"
-#include <charconv>
 
 LOG_CHANNEL(cfg_log, "CFG");
 
@@ -8,11 +7,7 @@ cfg_recording g_cfg_recording;
 
 cfg_recording::cfg_recording()
 	: cfg::node()
-#ifdef _WIN32
-	, path(fs::get_config_dir() + "config/recording.yml")
-#else
-	, path(fs::get_config_dir() + "recording.yml")
-#endif
+	, path(fs::get_config_dir(true) + "recording.yml")
 {
 }
 

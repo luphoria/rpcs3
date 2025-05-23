@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "overlay_controls.h"
+#include "overlay_fonts.h"
 #include "Emu/System.h"
 #include "Emu/vfs_config.h"
 
@@ -417,13 +417,14 @@ namespace rsx
 			return {loc_x, loc_y};
 		}
 
-		std::vector<u8> font::get_glyph_data() const
+		const std::vector<u8>& font::get_glyph_data() const
 		{
-			std::vector<u8> bytes;
-			const u32 page_size = codepage::bitmap_width * codepage::bitmap_height;
+			constexpr u32 page_size = codepage::bitmap_width * codepage::bitmap_height;
 			const auto size = page_size * m_glyph_map.size();
 
+			static thread_local std::vector<u8> bytes;
 			bytes.resize(size);
+
 			u8* data = bytes.data();
 
 			for (const auto& e : m_glyph_map)

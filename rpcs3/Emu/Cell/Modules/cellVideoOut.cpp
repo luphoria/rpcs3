@@ -423,7 +423,7 @@ error_code cellVideoOutGetDeviceInfo(u32 videoOut, u32 deviceIndex, vm::ptr<Cell
 
 error_code cellVideoOutGetNumberOfDevice(u32 videoOut)
 {
-	cellSysutil.warning("cellVideoOutGetNumberOfDevice(videoOut=%d)", videoOut);
+	cellSysutil.trace("cellVideoOutGetNumberOfDevice(videoOut=%d)", videoOut);
 
 	switch (videoOut)
 	{
@@ -477,11 +477,6 @@ error_code cellVideoOutGetResolutionAvailability(u32 videoOut, u32 resolutionId,
 
 	return CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT;
 }
-
-// Temporarily
-#ifndef _MSC_VER
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif
 
 error_code cellVideoOutGetConvertCursorColorInfo(vm::ptr<u8> rgbOutputRange)
 {

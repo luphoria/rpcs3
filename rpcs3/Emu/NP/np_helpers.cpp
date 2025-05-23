@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "util/types.hpp"
 #include "Utilities/StrUtil.h"
-#include "np_handler.h"
+#include "rpcn_client.h"
 
 #ifdef _WIN32
 #include <WS2tcpip.h>
@@ -11,7 +11,7 @@ namespace np
 {
 	std::string ip_to_string(u32 ip_addr)
 	{
-		char ip_str[16];
+		char ip_str[16]{};
 
 		inet_ntop(AF_INET, &ip_addr, ip_str, sizeof(ip_str));
 		return std::string(ip_str);

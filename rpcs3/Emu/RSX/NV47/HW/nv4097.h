@@ -221,12 +221,12 @@ namespace rsx
 			}
 		};
 
-		template<u32 index>
-		struct set_texture_dirty_bit
+		template <u32 index>
+		struct set_fragment_texture_dirty_bit
 		{
-			static void impl(context* ctx, u32 /*reg*/, u32 /*arg*/)
+			static void impl(context* ctx, u32 /*reg*/, u32 arg)
 			{
-				util::set_fragment_texture_dirty_bit(ctx, index);
+				util::set_fragment_texture_dirty_bit(ctx, arg, index);
 			}
 		};
 

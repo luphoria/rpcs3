@@ -35,6 +35,7 @@
 /lib
 /tmp
 /ipch
+/packages
 /rpcs3/Debug
 /rpcs3/Release
 
@@ -54,9 +55,6 @@
 /bin/GuiConfigs/*.ini.*
 /bin/GuiConfigs/*.dat
 /bin/GuiConfigs/*.dat.*
-
-# Some data from git
-!/bin/git/
 
 # Visual Studio Files
 .vs/*

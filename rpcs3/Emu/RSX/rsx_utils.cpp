@@ -1,9 +1,7 @@
 #include "stdafx.h"
 #include "rsx_utils.h"
 #include "rsx_methods.h"
-#include "Emu/RSX/GCM.h"
 #include "Emu/Cell/Modules/cellVideoOut.h"
-#include "Overlays/overlays.h"
 
 #ifdef _MSC_VER
 #pragma warning(push, 0)
@@ -42,7 +40,7 @@ namespace rsx
 	void clip_image(u8 *dst, const u8 *src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch)
 	{
 		const u8* pixels_src = src + clip_y * src_pitch + clip_x * bpp;
-		u8 *pixels_dst = dst;
+		u8* pixels_dst = dst;
 		const u32 row_length = clip_w * bpp;
 
 		for (int y = 0; y < clip_h; ++y)

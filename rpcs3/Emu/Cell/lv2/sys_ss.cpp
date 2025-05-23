@@ -3,7 +3,6 @@
 
 #include "sys_process.h"
 #include "Emu/IdManager.h"
-#include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/timers.hpp"
 #include "Emu/system_config.h"
 #include "util/sysinfo.hpp"
@@ -554,7 +553,7 @@ error_code sys_ss_individual_info_manager(u64 pkg_id, u64 a2, vm::ptr<u64> out_s
 	case 0x17002:
 	{
 		// TODO
-		vm::_ref<u64>(a5) = a4; // Write back size of buffer
+		vm::write<u64>(static_cast<u32>(a5), a4); // Write back size of buffer
 		break;
 	}
 	// Get EID size

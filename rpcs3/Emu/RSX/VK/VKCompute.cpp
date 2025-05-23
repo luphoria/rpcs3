@@ -2,6 +2,7 @@
 #include "VKHelpers.h"
 #include "VKRenderPass.h"
 #include "vkutils/buffer_object.h"
+#include "VKPipelineCompiler.h"
 
 #define VK_MAX_COMPUTE_TASKS 8192   // Max number of jobs per frame
 
@@ -78,6 +79,8 @@ namespace vk
 				break;
 			case vk::driver_vendor::LAVAPIPE:
 			case vk::driver_vendor::V3DV:
+			case vk::driver_vendor::PANVK:
+			case vk::driver_vendor::ARM_MALI:
 				// TODO: Actually bench this. Using 32 for now to match other common configurations.
 			case vk::driver_vendor::DOZEN:
 				// Actual optimal size depends on the D3D device. Use 32 since it should work well on both AMD and NVIDIA

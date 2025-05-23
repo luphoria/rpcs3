@@ -2,7 +2,6 @@
 
 #include "util/types.hpp"
 #include <functional>
-#include <mutex>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -174,7 +173,8 @@ namespace atomic_wait
 
 		constexpr list& operator=(const list&) noexcept = default;
 
-		template <typename... U, typename = std::void_t<decltype(std::declval<U>().wait(any_value))...>>
+		template <typename... U>
+			requires(requires(U& u) { u.wait(any_value); } && ...)
 		constexpr list(U&... vars)
 			: m_info{{&vars, 0}...}
 		{
@@ -191,7 +191,8 @@ namespace atomic_wait
 			return *this;
 		}
 
-		template <uint Index, typename T2, typename U, typename = std::void_t<decltype(std::declval<T2>().wait(any_value))>>
+		template <uint Index, typename T2, typename U>
+			requires(requires(T2& t2) { t2.wait(any_value); })
 		constexpr void set(T2& var, U value)
 		{
 			static_assert(Index < Max);
@@ -204,9 +205,9 @@ namespace atomic_wait
 		constexpr void set(lf_queue<T2>& var, std::nullptr_t = nullptr)
 		{
 			static_assert(Index < Max);
-			static_assert(sizeof(var) == sizeof(uptr));
+			static_assert(sizeof(var) == sizeof(uptr) * 2);
 
-			m_info[Index].data = reinterpret_cast<char*>(&var) + sizeof(u32);
+			m_info[Index].data = std::bit_cast<char*>(&var.get_wait_atomic().raw());
 			m_info[Index].old = 0;
 		}
 
@@ -214,9 +215,9 @@ namespace atomic_wait
 		constexpr void set(stx::atomic_ptr<T2>& var, std::nullptr_t = nullptr)
 		{
 			static_assert(Index < Max);
-			static_assert(sizeof(var) == sizeof(uptr));
+			static_assert(sizeof(var) == sizeof(uptr) * 2);
 
-			m_info[Index].data = reinterpret_cast<char*>(&var) + sizeof(u32);
+			m_info[Index].data = std::bit_cast<char*>(&var.get_wait_atomic().raw());
 			m_info[Index].old = 0;
 		}
 
@@ -230,7 +231,8 @@ namespace atomic_wait
 		}
 	};
 
-	template <typename... T, typename = std::void_t<decltype(std::declval<T>().wait(any_value))...>>
+	template <typename... T>
+		requires(requires(T& t) { t.wait(any_value); } && ...)
 	list(T&... vars) -> list<sizeof...(T), T...>;
 }
 

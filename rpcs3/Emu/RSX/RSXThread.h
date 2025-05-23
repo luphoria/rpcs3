@@ -1,14 +1,8 @@
 #pragma once
 
-#include <thread>
 #include <queue>
 #include <deque>
-#include <variant>
-#include <stack>
-#include <unordered_map>
 
-#include "GCM.h"
-#include "rsx_cache.h"
 #include "RSXFIFO.h"
 #include "RSXOffload.h"
 #include "RSXZCULL.h"
@@ -16,6 +10,7 @@
 #include "Common/bitfield.hpp"
 #include "Common/profiling_timer.hpp"
 #include "Common/texture_cache_types.h"
+#include "Common/TextureUtils.h"
 #include "Program/RSXVertexProgram.h"
 #include "Program/RSXFragmentProgram.h"
 
@@ -32,7 +27,6 @@
 #include "Core/RSXDriverState.h"
 #include "Core/RSXFrameBuffer.h"
 #include "Core/RSXContext.h"
-#include "Core/RSXIOMap.hpp"
 #include "Core/RSXVertexTypes.h"
 
 #include "NV47/FW/GRAPH_backend.h"
@@ -87,6 +81,7 @@ namespace rsx
 	{
 		bool supports_multidraw;               // Draw call batching
 		bool supports_hw_a2c;                  // Alpha to coverage
+		bool supports_hw_a2c_1spp;             // Alpha to coverage at 1 sample per pixel
 		bool supports_hw_renormalization;      // Should be true on NV hardware which matches PS3 texture renormalization behaviour
 		bool supports_hw_msaa;                 // MSAA support
 		bool supports_hw_a2one;                // Alpha to one
@@ -96,8 +91,6 @@ namespace rsx
 		bool supports_host_gpu_labels;         // Advanced host synchronization
 		bool supports_normalized_barycentrics; // Basically all GPUs except NVIDIA have properly normalized barycentrics
 	};
-
-	class sampled_image_descriptor_base;
 
 	struct desync_fifo_cmd_info
 	{
@@ -248,10 +241,14 @@ namespace rsx
 
 		rsx::atomic_bitmask_t<rsx::eng_interrupt_reason> m_eng_interrupt_mask;
 		rsx::bitmask_t<rsx::pipeline_state> m_graphics_state;
+
 		u64 ROP_sync_timestamp = 0;
 
 		program_hash_util::fragment_program_utils::fragment_program_metadata current_fp_metadata = {};
 		program_hash_util::vertex_program_utils::vertex_program_metadata current_vp_metadata = {};
+
+		std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count> fs_sampler_state = {};
+		std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::vertex_textures_count> vs_sampler_state = {};
 
 		std::array<u32, 4> get_color_surface_addresses() const;
 		u32 get_zeta_surface_address() const;
@@ -265,6 +262,8 @@ namespace rsx
 
 		vertex_program_texture_state current_vp_texture_state = {};
 		fragment_program_texture_state current_fp_texture_state = {};
+
+		program_cache_hint_t m_program_cache_hint;
 
 		// Runs shader prefetch and resolves pipeline status flags
 		void analyse_current_rsx_pipeline();
@@ -436,6 +435,8 @@ namespace rsx
 
 		bool is_current_vertex_program_instanced() const { return !!(current_vertex_program.ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS); }
 
+		virtual bool is_current_program_interpreted() const { return false; }
+
 	public:
 		void reset();
 		void init(u32 ctrlAddress);
@@ -463,5 +464,10 @@ namespace rsx
 	inline thread* get_current_renderer()
 	{
 		return g_fxo->try_get<rsx::thread>();
+	}
+
+	inline const backend_configuration& get_renderer_backend_config()
+	{
+		return g_fxo->get<rsx::thread>().get_backend_config();
 	}
 }

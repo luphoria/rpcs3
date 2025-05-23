@@ -1,8 +1,7 @@
 #pragma once
 
-#include "cellVpost.h"
-
 #include "Emu/Memory/vm_ptr.h"
+#include "cellVpost.h"
 
 // Error Codes
 enum CellSailError : u32
@@ -674,11 +673,11 @@ union CellSailEvent
 	be_t<u64> value;
 };
 
-template<typename T, typename>
+template <typename T>
 struct ppu_gpr_cast_impl;
 
-template<>
-struct ppu_gpr_cast_impl<CellSailEvent, void>
+template <>
+struct ppu_gpr_cast_impl<CellSailEvent>
 {
 	static inline u64 to(const CellSailEvent& event)
 	{

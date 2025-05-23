@@ -1,8 +1,8 @@
 #include "GLOverlays.h"
 
-#include "Emu/system_config.h"
-#include "../rsx_utils.h"
+#include "Utilities/StrUtil.h"
 #include "../Program/RSXOverlay.h"
+#include "Emu/Cell/timers.hpp"
 
 namespace gl
 {
@@ -23,6 +23,8 @@ namespace gl
 	{
 		if (!compiled)
 		{
+			ensure(!fs_src.empty() && !vs_src.empty(), "Shaders have not been initialized.");
+
 			fs.create(::glsl::program_domain::glsl_fragment_program, fs_src);
 			fs.compile();
 
@@ -33,6 +35,8 @@ namespace gl
 			program_handle.attach(vs);
 			program_handle.attach(fs);
 			program_handle.link();
+
+			ensure(program_handle.id());
 
 			fbo.create();
 
@@ -75,7 +79,7 @@ namespace gl
 		}
 	}
 
-	void overlay_pass::emit_geometry()
+	void overlay_pass::emit_geometry(gl::command_context& /*cmd*/)
 	{
 		int old_vao;
 		glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &old_vao);
@@ -88,11 +92,7 @@ namespace gl
 
 	void overlay_pass::run(gl::command_context& cmd, const areau& region, GLuint target_texture, GLuint image_aspect_bits, bool enable_blending)
 	{
-		if (!compiled)
-		{
-			rsx_log.error("You must initialize overlay passes with create() before calling run()");
-			return;
-		}
+		ensure(compiled && program_handle.id() != GL_NONE, "You must initialize overlay passes with create() before calling run()");
 
 		GLint viewport[4];
 		std::unique_ptr<fbo::save_binding_state> save_fbo;
@@ -110,6 +110,10 @@ namespace gl
 			case gl::image_aspect::depth:
 				fbo.draw_buffer(fbo.no_color);
 				fbo.depth = target_texture;
+				break;
+			case gl::image_aspect::stencil:
+				fbo.draw_buffer(fbo.no_color);
+				fbo.depth_stencil = target_texture;
 				break;
 			case gl::image_aspect::depth | gl::image_aspect::stencil:
 				fbo.draw_buffer(fbo.no_color);
@@ -176,7 +180,7 @@ namespace gl
 			cmd->use_program(program_handle.id());
 			on_load();
 			bind_resources();
-			emit_geometry();
+			emit_geometry(cmd);
 
 			glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 
@@ -214,12 +218,12 @@ namespace gl
 		m_input_filter = gl::filter::linear;
 	}
 
-	gl::texture_view* ui_overlay_renderer::load_simple_image(rsx::overlays::image_info* desc, bool temp_resource, u32 owner_uid)
+	gl::texture_view* ui_overlay_renderer::load_simple_image(rsx::overlays::image_info_base* desc, bool temp_resource, u32 owner_uid)
 	{
-		auto tex = std::make_unique<gl::texture>(GL_TEXTURE_2D, desc->w, desc->h, 1, 1, GL_RGBA8);
+		auto tex = std::make_unique<gl::texture>(GL_TEXTURE_2D, desc->w, desc->h, 1, 1, 1, GL_RGBA8, RSX_FORMAT_CLASS_COLOR);
 		tex->copy_from(desc->get_data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
 
-		GLenum remap[] = { GL_RED, GL_ALPHA, GL_BLUE, GL_GREEN };
+		const GLenum remap[] = { GL_RED, GL_ALPHA, GL_BLUE, GL_GREEN };
 		auto view = std::make_unique<gl::texture_view>(tex.get(), remap);
 
 		auto result = view.get();
@@ -230,7 +234,7 @@ namespace gl
 		}
 		else
 		{
-			u64 key = reinterpret_cast<u64>(desc);
+			const u64 key = reinterpret_cast<u64>(desc);
 			temp_image_cache[key] = std::make_pair(owner_uid, std::move(tex));
 			temp_view_cache[key] = std::move(view);
 		}
@@ -245,7 +249,7 @@ namespace gl
 		rsx::overlays::resource_config configuration;
 		configuration.load_files();
 
-		for (const auto &res : configuration.texture_raw_data)
+		for (const auto& res : configuration.texture_raw_data)
 		{
 			load_simple_image(res.get(), false, -1);
 		}
@@ -299,9 +303,9 @@ namespace gl
 		}
 
 		// Create font file
-		const std::vector<u8> glyph_data = font->get_glyph_data();
+		const std::vector<u8>& glyph_data = font->get_glyph_data();
 
-		auto tex = std::make_unique<gl::texture>(GL_TEXTURE_2D_ARRAY, font_size.width, font_size.height, font_size.depth, 1, GL_R8);
+		auto tex = std::make_unique<gl::texture>(GL_TEXTURE_2D_ARRAY, font_size.width, font_size.height, font_size.depth, 1, 1, GL_R8, RSX_FORMAT_CLASS_COLOR);
 		tex->copy_from(glyph_data.data(), gl::texture::format::r, gl::texture::type::ubyte, {});
 
 		GLenum remap[] = { GL_RED, GL_RED, GL_RED, GL_RED };
@@ -314,13 +318,22 @@ namespace gl
 		return result;
 	}
 
-	gl::texture_view* ui_overlay_renderer::find_temp_image(rsx::overlays::image_info* desc, u32 owner_uid)
+	gl::texture_view* ui_overlay_renderer::find_temp_image(rsx::overlays::image_info_base* desc, u32 owner_uid)
 	{
-		auto key = reinterpret_cast<u64>(desc);
+		const bool dirty = std::exchange(desc->dirty, false);
+		const u64 key = reinterpret_cast<u64>(desc);
+
 		auto cached = temp_view_cache.find(key);
 		if (cached != temp_view_cache.end())
 		{
-			return cached->second.get();
+			gl::texture_view* view = cached->second.get();
+
+			if (dirty)
+			{
+				view->image()->copy_from(desc->get_data(), gl::texture::format::rgba, gl::texture::type::uint_8_8_8_8, {});
+			}
+
+			return view;
 		}
 
 		return load_simple_image(desc, true, owner_uid);
@@ -350,7 +363,7 @@ namespace gl
 		}
 	}
 
-	void ui_overlay_renderer::emit_geometry()
+	void ui_overlay_renderer::emit_geometry(gl::command_context& cmd)
 	{
 		if (m_current_primitive_type == rsx::overlays::primitive_type::quad_list)
 		{
@@ -378,7 +391,7 @@ namespace gl
 		}
 		else
 		{
-			overlay_pass::emit_geometry();
+			overlay_pass::emit_geometry(cmd);
 		}
 	}
 
@@ -416,7 +429,7 @@ namespace gl
 			}
 			case rsx::overlays::image_resource_id::raw_image:
 			{
-				cmd_->bind_texture(31, GL_TEXTURE_2D, find_temp_image(static_cast<rsx::overlays::image_info*>(cmd.config.external_data_ref), ui.uid)->id());
+				cmd_->bind_texture(31, GL_TEXTURE_2D, find_temp_image(static_cast<rsx::overlays::image_info_base*>(cmd.config.external_data_ref), ui.uid)->id());
 				break;
 			}
 			case rsx::overlays::image_resource_id::font_file:

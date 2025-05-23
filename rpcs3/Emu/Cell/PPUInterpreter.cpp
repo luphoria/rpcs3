@@ -26,6 +26,31 @@
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #endif
 
+#ifdef RPCS3_HAS_MEMORY_BREAKPOINTS
+void ppubreak(ppu_thread& ppu)
+{
+	if (!g_breakpoint_handler.IsBreakOnBPM())
+		return;
+
+	if (!ppu.state.test_and_set(cpu_flag::dbg_pause))
+	{
+		ppu.check_state();
+	}
+}
+
+#define PPU_WRITE(type, addr, value) vm::write<type>(addr, value, &ppu);
+#define PPU_WRITE_8(addr, value) vm::write8(addr, value, &ppu);
+#define PPU_WRITE_16(addr, value) vm::write16(addr, value, &ppu);
+#define PPU_WRITE_32(addr, value) vm::write32(addr, value, &ppu);
+#define PPU_WRITE_64(addr, value) vm::write64(addr, value, &ppu);
+#else
+#define PPU_WRITE(type, addr, value) vm::write<type>(addr, value);
+#define PPU_WRITE_8(addr, value) vm::write8(addr, value);
+#define PPU_WRITE_16(addr, value) vm::write16(addr, value);
+#define PPU_WRITE_32(addr, value) vm::write32(addr, value);
+#define PPU_WRITE_64(addr, value) vm::write64(addr, value);
+#endif
+
 extern bool is_debugger_present();
 
 extern const ppu_decoder<ppu_itype> g_ppu_itype;
@@ -114,7 +139,7 @@ struct ppu_exec_select
 #define RETURN_(...) \
 	if constexpr (Build == 0) { \
 		static_cast<void>(exec); \
-		if (is_debugger_present()) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) { \
+		if (is_debugger_present() || g_cfg.core.ppu_debug) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) { \
 			exec(__VA_ARGS__); \
 			const auto next_op = this_op + 1; \
 			const auto fn = atomic_storage<ppu_intrp_func_t>::load(next_fn->fn); \
@@ -428,6 +453,14 @@ auto ppu_feed_data(ppu_thread& ppu, u64 addr)
 
 	auto value = vm::_ref<T>(vm::cast(addr));
 
+#ifdef RPCS3_HAS_MEMORY_BREAKPOINTS
+	if (g_breakpoint_handler.HasBreakpoint(addr, breakpoint_types::bp_read))
+	{
+		debugbp_log.success("BPMR: breakpoint reading 0x%x at 0x%x", value, addr);
+		ppubreak(ppu);
+	}
+#endif
+
 	if constexpr (!((Flags == use_feed_data) || ...))
 	{
 		return value;
@@ -453,6 +486,7 @@ auto ppu_feed_data(ppu_thread& ppu, u64 addr)
 		{
 			// Reservation was lost
 			ppu.raddr = 0;
+			ppu.res_cached = 0;
 		}
 	}
 	else
@@ -472,6 +506,7 @@ auto ppu_feed_data(ppu_thread& ppu, u64 addr)
 		if (std::memcmp(buffer + offs, src, size))
 		{
 			ppu.raddr = 0;
+			ppu.res_cached = 0;
 		}
 	}
 
@@ -4274,7 +4309,7 @@ auto STVEBX()
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
 	const u8 eb = addr & 0xf;
-	vm::write8(vm::cast(addr), ppu.vr[op.vs]._u8[15 - eb]);
+	PPU_WRITE_8(vm::cast(addr), ppu.vr[op.vs]._u8[15 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4381,7 +4416,7 @@ auto STDX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::write64(vm::cast(addr), ppu.gpr[op.rs]);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4407,7 +4442,7 @@ auto STWX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -4421,7 +4456,7 @@ auto STVEHX()
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~1ULL;
 	const u8 eb = (addr & 0xf) >> 1;
-	vm::write16(vm::cast(addr), ppu.vr[op.vs]._u16[7 - eb]);
+	PPU_WRITE_16(vm::cast(addr), ppu.vr[op.vs]._u16[7 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4434,7 +4469,7 @@ auto STDUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::write64(vm::cast(addr), ppu.gpr[op.rs]);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -4448,7 +4483,7 @@ auto STWUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -4463,7 +4498,7 @@ auto STVEWX()
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~3ULL;
 	const u8 eb = (addr & 0xf) >> 2;
-	vm::write32(vm::cast(addr), ppu.vr[op.vs]._u32[3 - eb]);
+	PPU_WRITE_32(vm::cast(addr), ppu.vr[op.vs]._u32[3 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4527,7 +4562,7 @@ auto STBX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::write8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -4540,7 +4575,7 @@ auto STVX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-	vm::_ref<v128>(vm::cast(addr)) = ppu.vr[op.vs];
+	PPU_WRITE(v128, vm::cast(addr), ppu.vr[op.vs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4639,7 +4674,7 @@ auto STBUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::write8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -4883,7 +4918,7 @@ auto STHX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::write16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -4922,7 +4957,7 @@ auto STHUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::write16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5041,7 +5076,7 @@ auto STVXL()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-	vm::_ref<v128>(vm::cast(addr)) = ppu.vr[op.vs];
+	PPU_WRITE(v128, vm::cast(addr), ppu.vr[op.vs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5330,7 +5365,7 @@ auto STDBRX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::_ref<le_t<u64>>(vm::cast(addr)) = ppu.gpr[op.rs];
+	PPU_WRITE(le_t<u64>, vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5346,7 +5381,7 @@ auto STSWX()
 	u32 count = ppu.xer.cnt & 0x7F;
 	for (; count >= 4; count -= 4, addr += 4, op.rs = (op.rs + 1) & 31)
 	{
-		vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	}
 	if (count)
 	{
@@ -5354,7 +5389,7 @@ auto STSWX()
 		for (u32 byte = 0; byte < count; byte++)
 		{
 			u8 byte_value = static_cast<u8>(value >> ((3 ^ byte) * 8));
-			vm::write8(vm::cast(addr + byte), byte_value);
+			PPU_WRITE_8(vm::cast(addr + byte), byte_value);
 		}
 	}
 	};
@@ -5369,7 +5404,7 @@ auto STWBRX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::_ref<le_t<u32>>(vm::cast(addr)) = static_cast<u32>(ppu.gpr[op.rs]);
+	PPU_WRITE(le_t<u32>, vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5382,7 +5417,7 @@ auto STFSX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5413,7 +5448,7 @@ auto STFSUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5434,7 +5469,7 @@ auto STSWI()
 	{
 		if (N > 3)
 		{
-			vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[reg]));
+			PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[reg]));
 			addr += 4;
 			N -= 4;
 		}
@@ -5444,7 +5479,7 @@ auto STSWI()
 			while (N > 0)
 			{
 				N = N - 1;
-				vm::write8(vm::cast(addr), (0xFF000000 & buf) >> 24);
+				PPU_WRITE_8(vm::cast(addr), (0xFF000000 & buf) >> 24);
 				buf <<= 8;
 				addr++;
 			}
@@ -5463,7 +5498,7 @@ auto STFDX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5476,7 +5511,7 @@ auto STFDUX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-	vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5631,7 +5666,7 @@ auto STHBRX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::_ref<le_t<u16>>(vm::cast(addr)) = static_cast<u16>(ppu.gpr[op.rs]);
+	PPU_WRITE(le_t<u16>, vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5678,7 +5713,7 @@ auto STFIWX()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-	vm::write32(vm::cast(addr), static_cast<u32>(std::bit_cast<u64>(ppu.fpr[op.frs])));
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(std::bit_cast<u64>(ppu.fpr[op.frs])));
 	};
 	RETURN_(ppu, op);
 }
@@ -5793,7 +5828,7 @@ auto STW()
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
-	vm::write32(vm::cast(addr), value);
+	PPU_WRITE_32(vm::cast(addr), value);
 
 	//Insomniac engine v3 & v4 (newer R&C, Fuse, Resitance 3)
 	if (value == 0xAAAAAAAA) [[unlikely]]
@@ -5813,7 +5848,7 @@ auto STWU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
-	vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5827,7 +5862,7 @@ auto STB()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-	vm::write8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5840,7 +5875,7 @@ auto STBU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
-	vm::write8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5908,7 +5943,7 @@ auto STH()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-	vm::write16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5921,7 +5956,7 @@ auto STHU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
-	vm::write16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -5953,7 +5988,7 @@ auto STMW()
 	u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	for (u32 i = op.rs; i<32; ++i, addr += 4)
 	{
-		vm::write32(vm::cast(addr), static_cast<u32>(ppu.gpr[i]));
+		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[i]));
 	}
 	};
 	RETURN_(ppu, op);
@@ -6021,7 +6056,7 @@ auto STFS()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-	vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -6034,7 +6069,7 @@ auto STFSU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
-	vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -6048,7 +6083,7 @@ auto STFD()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-	vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -6061,7 +6096,7 @@ auto STFDU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + op.simm16;
-	vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
@@ -6115,7 +6150,7 @@ auto STD()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
-	vm::write64(vm::cast(addr), ppu.gpr[op.rs]);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -6128,7 +6163,7 @@ auto STDU()
 
 	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
 	const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
-	vm::write64(vm::cast(addr), ppu.gpr[op.rs]);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);

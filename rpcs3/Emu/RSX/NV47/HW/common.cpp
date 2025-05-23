@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "common.h"
 
+#include "Emu/RSX/Common/TextureUtils.h"
 #include "Emu/RSX/RSXThread.h"
 
 #define RSX(ctx) ctx->rsxthr
@@ -10,6 +11,16 @@ namespace rsx
 {
 	namespace util
 	{
+		bool is_volatile_TIU(rsx::context* ctx, u32 index)
+		{
+			if (!RSX(ctx)->fs_sampler_state[index])
+			{
+				return false;
+			}
+
+			return RSX(ctx)->fs_sampler_state[index]->upload_context != rsx::texture_upload_context::shader_read;
+		}
+
 		void push_vertex_data(rsx::context* ctx, u32 attrib_index, u32 channel_select, int count, rsx::vertex_base_type vtype, u32 value)
 		{
 			if (RSX(ctx)->in_begin_end)
@@ -62,8 +73,13 @@ namespace rsx
 			return vm::cast(get_address(offset, location));
 		}
 
-		void set_fragment_texture_dirty_bit(rsx::context* ctx, u32 index)
+		void set_fragment_texture_dirty_bit(rsx::context* ctx, u32 arg, u32 index)
 		{
+			if (REGS(ctx)->latch == arg && !is_volatile_TIU(ctx, index))
+			{
+				return;
+			}
+
 			RSX(ctx)->m_textures_dirty[index] = true;
 
 			if (RSX(ctx)->current_fp_metadata.referenced_textures_mask & (1 << index))

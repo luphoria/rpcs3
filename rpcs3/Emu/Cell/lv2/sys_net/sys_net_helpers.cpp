@@ -1,12 +1,15 @@
 #include "stdafx.h"
-
 #include "Emu/IdManager.h"
+#include "Emu/system_config.h"
 #include "Emu/Cell/PPUThread.h"
-
 #include "lv2_socket.h"
 #include "sys_net_helpers.h"
-
 #include "network_context.h"
+
+#ifdef _WIN32
+#include "Emu/NP/np_handler.h"
+#include "Emu/NP/np_helpers.h"
+#endif
 
 LOG_CHANNEL(sys_net);
 
@@ -32,13 +35,13 @@ sys_net_error convert_error(bool is_blocking, int native_error, [[maybe_unused]]
 #define ERROR_CASE(error)         \
 	case WSA##error:              \
 		result = SYS_NET_##error; \
-		name   = #error;          \
+		name = #error;            \
 		break;
 #else
 #define ERROR_CASE(error)         \
 	case error:                   \
 		result = SYS_NET_##error; \
-		name   = #error;          \
+		name = #error;            \
 		break;
 #endif
 	switch (native_error)
@@ -86,11 +89,11 @@ sys_net_error convert_error(bool is_blocking, int native_error, [[maybe_unused]]
 		ERROR_CASE(EHOSTDOWN);
 		ERROR_CASE(EHOSTUNREACH);
 #ifdef _WIN32
-		// Windows likes to be special with unique errors
-		case WSAENETRESET:
-			result = SYS_NET_ECONNRESET;
-			name = "WSAENETRESET";
-			break;
+	// Windows likes to be special with unique errors
+	case WSAENETRESET:
+		result = SYS_NET_ECONNRESET;
+		name = "WSAENETRESET";
+		break;
 #endif
 	default:
 		fmt::throw_exception("sys_net get_last_error(is_blocking=%d, native_error=%d): Unknown/illegal socket error", is_blocking, native_error);
@@ -136,12 +139,12 @@ sys_net_sockaddr native_addr_to_sys_net_addr(const ::sockaddr_storage& native_ad
 	sys_net_sockaddr sn_addr;
 
 	sys_net_sockaddr_in* paddr = reinterpret_cast<sys_net_sockaddr_in*>(&sn_addr);
+	*paddr = {};
 
-	paddr->sin_len    = sizeof(sys_net_sockaddr_in);
+	paddr->sin_len = sizeof(sys_net_sockaddr_in);
 	paddr->sin_family = SYS_NET_AF_INET;
-	paddr->sin_port   = std::bit_cast<be_t<u16>, u16>(reinterpret_cast<const sockaddr_in*>(&native_addr)->sin_port);
-	paddr->sin_addr   = std::bit_cast<be_t<u32>, u32>(reinterpret_cast<const sockaddr_in*>(&native_addr)->sin_addr.s_addr);
-	paddr->sin_zero   = 0;
+	paddr->sin_port = std::bit_cast<be_t<u16>, u16>(reinterpret_cast<const sockaddr_in*>(&native_addr)->sin_port);
+	paddr->sin_addr = std::bit_cast<be_t<u32>, u32>(reinterpret_cast<const sockaddr_in*>(&native_addr)->sin_addr.s_addr);
 
 	return sn_addr;
 }
@@ -153,16 +156,27 @@ sys_net_sockaddr native_addr_to_sys_net_addr(const ::sockaddr_storage& native_ad
 	const sys_net_sockaddr_in* psa_in = reinterpret_cast<const sys_net_sockaddr_in*>(&sn_addr);
 
 	::sockaddr_in native_addr{};
-	native_addr.sin_family      = AF_INET;
-	native_addr.sin_port        = std::bit_cast<u16>(psa_in->sin_port);
+	native_addr.sin_family = AF_INET;
+	native_addr.sin_port = std::bit_cast<u16>(psa_in->sin_port);
 	native_addr.sin_addr.s_addr = std::bit_cast<u32>(psa_in->sin_addr);
 
 #ifdef _WIN32
 	// Windows doesn't support sending packets to 0.0.0.0 but it works on unixes, send to 127.0.0.1 instead
 	if (native_addr.sin_addr.s_addr == 0x00000000)
 	{
-		sys_net.warning("[Native] Redirected 0.0.0.0 to 127.0.0.1");
-		native_addr.sin_addr.s_addr = std::bit_cast<u32, be_t<u32>>(0x7F000001);
+		auto& nph = g_fxo->get<named_thread<np::np_handler>>();
+		if (const u32 bind_addr = nph.get_bind_ip(); bind_addr != 0)
+		{
+			// If bind IP is set 0.0.0.0 was bound to binding_ip so we need to connect to that ip
+			sys_net.warning("[Native] Redirected 0.0.0.0 to %s", np::ip_to_string(bind_addr));
+			native_addr.sin_addr.s_addr = bind_addr;
+		}
+		else
+		{
+			// Otherwise we connect to localhost which should be bound
+			sys_net.warning("[Native] Redirected 0.0.0.0 to 127.0.0.1");
+			native_addr.sin_addr.s_addr = std::bit_cast<u32, be_t<u32>>(0x7F000001);
+		}
 	}
 #endif
 
@@ -189,9 +203,9 @@ u32 network_clear_queue(ppu_thread& ppu)
 	u32 cleared = 0;
 
 	idm::select<lv2_socket>([&](u32, lv2_socket& sock)
-	{
-		cleared += sock.clear_queue(&ppu);
-	});
+		{
+			cleared += sock.clear_queue(&ppu);
+		});
 
 	return cleared;
 }
@@ -202,8 +216,29 @@ void clear_ppu_to_awake(ppu_thread& ppu)
 	g_fxo->get<p2p_context>().del_ppu_to_awake(&ppu);
 }
 
+be_t<u32> resolve_binding_ip()
+{
+	in_addr conv{};
+	const std::string cfg_bind_addr = g_cfg.net.bind_address.to_string();
+
+	if (cfg_bind_addr == "0.0.0.0" || cfg_bind_addr == "")
+	{
+		return 0;
+	}
+
+	if (!inet_pton(AF_INET, cfg_bind_addr.c_str(), &conv))
+	{
+		// Do not set to disconnected on invalid IP just error and continue using default (0.0.0.0)
+		sys_net.error("Provided IP(%s) address for bind is invalid!", g_cfg.net.bind_address.to_string());
+		return 0;
+	}
+
+	return conv.s_addr;
+}
+
 #ifdef _WIN32
 // Workaround function for WSAPoll not reporting failed connections
+// Note that this was fixed in Windows 10 version 2004 (after more than 10 years lol)
 void windows_poll(std::vector<pollfd>& fds, unsigned long nfds, int timeout, std::vector<bool>& connecting)
 {
 	ensure(fds.size() >= nfds);
@@ -237,12 +272,12 @@ void windows_poll(std::vector<pollfd>& fds, unsigned long nfds, int timeout, std
 		{
 			if (!fds[i].revents)
 			{
-				int error        = 0;
+				int error = 0;
 				socklen_t intlen = sizeof(error);
 				if (getsockopt(fds[i].fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &intlen) == -1 || error != 0)
 				{
 					// Connection silently failed
-					connecting[i]  = false;
+					connecting[i] = false;
 					fds[i].revents = POLLERR | POLLHUP | (fds[i].events & (POLLIN | POLLOUT));
 				}
 			}

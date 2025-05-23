@@ -4,9 +4,9 @@
 #include "vfs_config.h"
 #include "Emu/Io/pad_config.h"
 #include "Emu/System.h"
+#include "Emu/VFS.h"
 #include "util/sysinfo.hpp"
 #include "Utilities/File.h"
-#include "Utilities/StrUtil.h"
 #include "Utilities/Thread.h"
 #include "Crypto/unpkg.h"
 #include "Crypto/unself.h"
@@ -311,11 +311,7 @@ namespace rpcs3::utils
 
 	std::string get_custom_config_dir()
 	{
-#ifdef _WIN32
-		return fs::get_config_dir() + "config/custom_configs/";
-#else
-		return fs::get_config_dir() + "custom_configs/";
-#endif
+		return fs::get_config_dir(true) + "custom_configs/";
 	}
 
 	std::string get_custom_config_path(const std::string& identifier)
@@ -330,11 +326,7 @@ namespace rpcs3::utils
 
 	std::string get_input_config_root()
 	{
-#ifdef _WIN32
-		return fs::get_config_dir() + "config/input_configs/";
-#else
-		return fs::get_config_dir() + "input_configs/";
-#endif
+		return fs::get_config_dir(true) + "input_configs/";
 	}
 
 	std::string get_input_config_dir(const std::string& title_id)
@@ -346,5 +338,99 @@ namespace rpcs3::utils
 	{
 		if (title_id.empty()) return "";
 		return get_input_config_dir(title_id) + g_cfg_input_configs.default_config + ".yml";
+	}
+
+	std::string get_game_content_path(game_content_type type)
+	{
+		const std::string locale_suffix = fmt::format("_%02d", static_cast<s32>(g_cfg.sys.language.get()));
+		const std::string disc_dir = vfs::get("/dev_bdvd/PS3_GAME");
+		std::string hdd0_dir = Emu.GetSfoDir(false);
+
+		if (hdd0_dir == disc_dir)
+		{
+			hdd0_dir.clear(); // No hdd0 dir
+		}
+
+		const bool check_disc = !disc_dir.empty();
+		const bool check_hdd0 = !hdd0_dir.empty() && !check_disc;
+
+		const auto find_content = [&](const std::string& name, const std::string& extension) -> std::string
+		{
+			// Check localized content first
+			for (bool localized : { true, false })
+			{
+				const std::string filename = fmt::format("/%s%s.%s", name, localized ? locale_suffix : std::string(), extension);
+
+				// Check content on hdd0 first
+				if (check_hdd0)
+				{
+					if (std::string path = hdd0_dir + filename; fs::is_file(path))
+					{
+						return path;
+					}
+				}
+
+				// Check content on disc
+				if (check_disc)
+				{
+					if (std::string path = disc_dir + filename; fs::is_file(path))
+					{
+						return path;
+					}
+				}
+			}
+
+			return {};
+		};
+
+		switch (type)
+		{
+		case game_content_type::content_icon:
+		{
+			return find_content("ICON0", "PNG");
+		}
+		case game_content_type::content_video:
+		{
+			return find_content("ICON1", "PAM");
+		}
+		case game_content_type::content_sound:
+		{
+			return find_content("SND0", "AT3");
+		}
+		case game_content_type::overlay_picture:
+		{
+			const bool high_res = g_cfg.video.aspect_ratio == video_aspect::_16_9;
+			return find_content(high_res ? "PIC0" : "PIC2", "PNG");
+		}
+		case game_content_type::background_picture:
+		case game_content_type::background_picture_2:
+		{
+			// Try to find a custom background first
+			if (std::string path = fs::get_config_dir() + "/Icons/game_icons/" + Emu.GetTitleID() + "/PIC1.PNG"; fs::is_file(path))
+			{
+				return path;
+			}
+
+			// Look for proper background
+			return find_content(type == game_content_type::background_picture ? "PIC1" : "PIC3", "PNG");
+		}
+		}
+
+		return {};
+	}
+
+	bool version_is_bigger(std::string_view v0, std::string_view v1, std::string_view serial, bool is_fw)
+	{
+		std::add_pointer_t<char> ev0, ev1;
+		const double ver0 = std::strtod(v0.data(), &ev0);
+		const double ver1 = std::strtod(v1.data(), &ev1);
+
+		if (v0.data() + v0.size() == ev0 && v1.data() + v1.size() == ev1)
+		{
+			return ver0 > ver1;
+		}
+
+		sys_log.error("Failed to compare the %s numbers for title ID %s: '%s'-'%s'", is_fw ? "firmware version" : "version", serial, v0, v1);
+		return false;
 	}
 }

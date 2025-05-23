@@ -178,7 +178,6 @@ public:
 	DualSenseFeatureSet feature_set{DualSenseFeatureSet::Normal};
 	bool init_lightbar{true};
 	bool update_lightbar{true};
-	bool update_player_leds{true};
 	bool release_leds{false};
 
 	// Controls for lightbar pulse. This seems somewhat hacky for now, as I haven't found out a nicer way.
@@ -246,7 +245,7 @@ private:
 	bool get_calibration_data(DualSenseDevice* dev) const;
 
 	DataStatus get_data(DualSenseDevice* device) override;
-	void check_add_device(hid_device* hidDevice, std::string_view path, std::wstring_view wide_serial) override;
+	void check_add_device(hid_device* hidDevice, hid_enumerated_device_view path, std::wstring_view wide_serial) override;
 	int send_output_report(DualSenseDevice* device) override;
 
 	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;

@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "overlay_message.h"
-#include "Emu/RSX/Common/time.hpp"
+#include "Emu/Cell/timers.hpp"
 
 namespace rsx
 {
@@ -100,7 +100,7 @@ namespace rsx
 			}
 
 			// Disable caching
-			is_compiled = false;
+			m_is_compiled = false;
 
 			compiled_resources = rounded_rect::get_compiled();
 			compiled_resources.add(m_text.get_compiled());

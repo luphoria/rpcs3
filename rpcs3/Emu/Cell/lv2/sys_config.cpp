@@ -1,6 +1,4 @@
 #include "stdafx.h"
-#include "Emu/System.h"
-#include "Emu/Memory/vm.h"
 #include "Emu/IdManager.h"
 
 #include "Emu/Cell/lv2/sys_event.h"
@@ -122,7 +120,7 @@ void lv2_config::remove_service_event(u32 id)
 
 lv2_config_service_event& lv2_config_service_event::operator=(thread_state s) noexcept
 {
-	if (s == thread_state::finished)
+	if (s == thread_state::destroying_context && !m_destroyed.exchange(true))
 	{
 		if (auto global = g_fxo->try_get<lv2_config>())
 		{
@@ -131,6 +129,23 @@ lv2_config_service_event& lv2_config_service_event::operator=(thread_state s) no
 	}
 
 	return *this;
+}
+
+lv2_config_service_event::~lv2_config_service_event() noexcept
+{
+	operator=(thread_state::destroying_context);
+}
+
+lv2_config::~lv2_config() noexcept
+{
+	for (auto& [key, event] : events)
+	{
+		if (event)
+		{
+			// Avoid collision with lv2_config_service_event destructor
+			event->m_destroyed = true;
+		}
+	}
 }
 
 // LV2 Config Service Listener

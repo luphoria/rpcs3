@@ -118,6 +118,7 @@ ds4_pad_handler::ds4_pad_handler()
 	b_has_rgb = true;
 	b_has_battery = true;
 	b_has_battery_led = true;
+	b_has_orientation = true;
 
 	m_name_string = "DS4 Pad #";
 	m_max_devices = CELL_PAD_MAX_PORT_NUM;
@@ -179,6 +180,7 @@ void ds4_pad_handler::init_config(cfg_pad* cfg)
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, DS4KeyCodes::None);
 	cfg->analog_limiter_button.def = ::at32(button_list, DS4KeyCodes::None);
+	cfg->orientation_reset_button.def = ::at32(button_list, DS4KeyCodes::None);
 
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
@@ -554,7 +556,7 @@ bool ds4_pad_handler::GetCalibrationData(DS4Device* ds4Dev) const
 	return true;
 }
 
-void ds4_pad_handler::check_add_device(hid_device* hidDevice, std::string_view path, std::wstring_view wide_serial)
+void ds4_pad_handler::check_add_device(hid_device* hidDevice, hid_enumerated_device_view path, std::wstring_view wide_serial)
 {
 	if (!hidDevice)
 	{
@@ -644,7 +646,7 @@ int ds4_pad_handler::send_output_report(DS4Device* device)
 
 	const auto config = device->config;
 	if (config == nullptr)
-		return -2; // hid_write and hid_write_control return -1 on error
+		return -2; // hid_write returns -1 on error
 
 	// write rumble state
 	ds4_output_report_common common{};
@@ -676,7 +678,7 @@ int ds4_pad_handler::send_output_report(DS4Device* device)
 
 		write_to_ptr(output.crc32, crcCalc);
 
-		return hid_write_control(device->hidDevice, &output.report_id, sizeof(ds4_output_report_bt));
+		return hid_write(device->hidDevice, &output.report_id, sizeof(ds4_output_report_bt));
 	}
 
 	ds4_output_report_usb output{};
@@ -829,13 +831,17 @@ bool ds4_pad_handler::get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& 
 PadHandlerBase::connection ds4_pad_handler::update_connection(const std::shared_ptr<PadDevice>& device)
 {
 	DS4Device* dev = static_cast<DS4Device*>(device.get());
-	if (!dev || dev->path.empty())
+	if (!dev || dev->path == hid_enumerated_device_default)
 		return connection::disconnected;
 
 	if (dev->hidDevice == nullptr)
 	{
 		// try to reconnect
+#ifdef ANDROID
+		if (hid_device* hid_dev = hid_libusb_wrap_sys_device(dev->path, -1))
+#else
 		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
+#endif
 		{
 			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
@@ -883,29 +889,27 @@ void ds4_pad_handler::get_extended_info(const pad_ensemble& binding)
 
 	// these values come already calibrated, all we need to do is convert to ds3 range
 
-	// accel
-	f32 accelX = static_cast<s16>(input.accel[0]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
-	f32 accelY = static_cast<s16>(input.accel[1]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
-	f32 accelZ = static_cast<s16>(input.accel[2]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
+	// acceleration (linear velocity in m/s²)
+	const f32 accel_x = static_cast<s16>(input.accel[0]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
+	const f32 accel_y = static_cast<s16>(input.accel[1]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
+	const f32 accel_z = static_cast<s16>(input.accel[2]) / static_cast<f32>(DS4_ACC_RES_PER_G) * -1;
+
+	// gyro (angular velocity in degree/s)
+	const f32 gyro_x = static_cast<s16>(input.gyro[0]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
+	const f32 gyro_y = static_cast<s16>(input.gyro[1]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
+	const f32 gyro_z = static_cast<s16>(input.gyro[2]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
 
 	// now just use formula from ds3
-	accelX = accelX * 113 + 512;
-	accelY = accelY * 113 + 512;
-	accelZ = accelZ * 113 + 512;
+	pad->m_sensors[0].m_value = Clamp0To1023(accel_x * MOTION_ONE_G + 512);
+	pad->m_sensors[1].m_value = Clamp0To1023(accel_y * MOTION_ONE_G + 512);
+	pad->m_sensors[2].m_value = Clamp0To1023(accel_z * MOTION_ONE_G + 512);
 
-	pad->m_sensors[0].m_value = Clamp0To1023(accelX);
-	pad->m_sensors[1].m_value = Clamp0To1023(accelY);
-	pad->m_sensors[2].m_value = Clamp0To1023(accelZ);
-
-	// gyroY is yaw, which is all that we need
-	//f32 gyroX = static_cast<s16>(input.gyro[0]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
-	f32 gyroY = static_cast<s16>(input.gyro[1]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
-	//f32 gyroZ = static_cast<s16>(input.gyro[2]) / static_cast<f32>(DS4_GYRO_RES_PER_DEG_S) * -1;
-
+	// gyro_y is yaw, which is all that we need.
 	// Convert to ds3. The ds3 resolution is 123/90°/sec.
-	gyroY = gyroY * (123.f / 90.f) + 512;
+	pad->m_sensors[3].m_value = Clamp0To1023(gyro_y * (123.f / 90.f) + 512);
 
-	pad->m_sensors[3].m_value = Clamp0To1023(gyroY);
+	// Set raw orientation
+	set_raw_orientation(pad->move_data, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
 }
 
 void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
@@ -920,11 +924,8 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	cfg_pad* config = dev->config;
 
 	// Attempt to send rumble no matter what
-	const int idx_l = config->switch_vibration_motors ? 1 : 0;
-	const int idx_s = config->switch_vibration_motors ? 0 : 1;
-
-	const u8 speed_large = config->enable_vibration_motor_large ? pad->m_vibrateMotors[idx_l].m_value : 0;
-	const u8 speed_small = config->enable_vibration_motor_small ? pad->m_vibrateMotors[idx_s].m_value : 0;
+	const u8 speed_large = config->get_large_motor_speed(pad->m_vibrateMotors);
+	const u8 speed_small = config->get_small_motor_speed(pad->m_vibrateMotors);
 
 	const bool wireless    = dev->cable_state == 0;
 	const bool low_battery = dev->battery_level < 2;

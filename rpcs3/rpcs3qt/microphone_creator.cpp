@@ -1,10 +1,10 @@
 #include "stdafx.h"
 #include "microphone_creator.h"
 
-#include "Utilities/StrFmt.h"
 #include "Utilities/StrUtil.h"
 
-#include "3rdparty/OpenAL/openal-soft/include/AL/alext.h"
+#include "3rdparty/OpenAL/openal-soft/include/AL/al.h"
+#include "3rdparty/OpenAL/openal-soft/include/AL/alc.h"
 
 LOG_CHANNEL(cfg_log, "CFG");
 
@@ -28,8 +28,9 @@ void microphone_creator::refresh_list()
 	{
 		if (const char* devices = alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER))
 		{
-			while (*devices != 0)
+			while (devices && *devices != 0)
 			{
+				cfg_log.notice("Found microphone: '%s'", devices);
 				m_microphone_list.append(devices);
 				devices += strlen(devices) + 1;
 			}
@@ -42,6 +43,7 @@ void microphone_creator::refresh_list()
 
 		if (const char* device = alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER))
 		{
+			cfg_log.notice("Found default microphone: '%s'", device);
 			m_microphone_list.append(device);
 		}
 	}

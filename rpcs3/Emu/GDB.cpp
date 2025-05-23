@@ -34,6 +34,8 @@
 #endif
 #endif
 
+#include "Emu/Cell/timers.hpp"
+
 #include <charconv>
 #include <regex>
 #include <string_view>
@@ -119,7 +121,7 @@ void gdb_thread::start_server()
 	// IPv4 address:port in format 127.0.0.1:2345
 	static const std::regex ipv4_regex("^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})\\:([0-9]{1,5})$");
 
-	auto [sname, sshared] = g_cfg.misc.gdb_server.get();
+	auto sname = g_cfg.misc.gdb_server.to_string();
 
 	if (sname[0] == '\0')
 	{
@@ -830,7 +832,7 @@ bool gdb_thread::cmd_vcont(gdb_cmd& cmd)
 		{
 			Emu.Run(true);
 		}
-		if (Emu.IsPaused())
+		else if (Emu.IsPaused())
 		{
 			Emu.Resume();
 		}

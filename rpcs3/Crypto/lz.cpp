@@ -2,6 +2,8 @@
 // Licensed under the terms of the GNU GPL, version 2.0 or later versions.
 // http://www.gnu.org/licenses/gpl-2.0.txt
 
+#include <string.h>
+#include <vector>
 #include "lz.h"
 
 void decode_range(unsigned int *range, unsigned int *code, unsigned char **src)
@@ -122,19 +124,17 @@ int decompress(unsigned char *out, unsigned char *in, unsigned int size)
 {
 	int result;
 
-	unsigned char *tmp = new unsigned char[0xCC8];
-
 	int offset = 0;
 	int bit_flag = 0;
 	int data_length = 0;
 	int data_offset = 0;
 
 	unsigned char *tmp_sect1, *tmp_sect2, *tmp_sect3;
-	unsigned char *buf_start, *buf_end;
+	const unsigned char *buf_start, *buf_end;
 	unsigned char prev = 0;
 
 	unsigned char *start = out;
-	unsigned char *end = (out + size);
+	const unsigned char *end = (out + size);
 	unsigned char head = in[0];
 
 	unsigned int range = 0xFFFFFFFF;
@@ -153,6 +153,8 @@ int decompress(unsigned char *out, unsigned char *in, unsigned int size)
 	else
 	{
 		// Set up a temporary buffer (sliding window).
+		std::vector<unsigned char> tmp_vec(0xCC8);
+		unsigned char* tmp = tmp_vec.data();
 		memset(tmp, 0x80, 0xCA8);
 		while (true)
 		{
@@ -253,14 +255,12 @@ int decompress(unsigned char *out, unsigned char *in, unsigned int size)
 				// Underflow.
 				if (buf_start < out)
 				{
-					delete[] tmp;
 					return -1;
 				}
 
 				// Overflow.
 				if (buf_end > end)
 				{
-					delete[] tmp;
 					return -1;
 				}
 
@@ -278,6 +278,5 @@ int decompress(unsigned char *out, unsigned char *in, unsigned int size)
 		}
 		result = static_cast<int>(start - out);
 	}
-	delete[] tmp;
 	return result;
 }
