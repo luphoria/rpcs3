@@ -68,7 +68,6 @@ enum class mapping_device
 	SHIFTER_5,
 	SHIFTER_6,
 	SHIFTER_R,
-	SHIFTER_PRESS,
 
 	// Enum count
 	COUNT
@@ -110,7 +109,6 @@ QString device_name(mapping_device dev)
 	case mapping_device::SHIFTER_5: return QObject::tr("Gear 5");
 	case mapping_device::SHIFTER_6: return QObject::tr("Gear 6");
 	case mapping_device::SHIFTER_R: return QObject::tr("Gear R");
-	case mapping_device::SHIFTER_PRESS: return QObject::tr("Shifter press");
 	case mapping_device::COUNT: return "";
 	}
 	return "";
@@ -153,7 +151,6 @@ emulated_logitech_g27_mapping& device_cfg(mapping_device dev)
 	case mapping_device::SHIFTER_5: return cfg.shifter_5;
 	case mapping_device::SHIFTER_6: return cfg.shifter_6;
 	case mapping_device::SHIFTER_R: return cfg.shifter_r;
-	case mapping_device::SHIFTER_PRESS: return cfg.shifter_press;
 	default: fmt::throw_exception("Unexpected mapping_device %d", static_cast<int>(dev));
 	}
 }

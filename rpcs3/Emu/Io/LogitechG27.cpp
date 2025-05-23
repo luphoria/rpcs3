@@ -205,7 +205,6 @@ static inline logitech_g27_sdl_mapping get_runtime_mapping()
 	convert_mapping(cfg.shifter_5, mapping.shifter_5);
 	convert_mapping(cfg.shifter_6, mapping.shifter_6);
 	convert_mapping(cfg.shifter_r, mapping.shifter_r);
-	convert_mapping(cfg.shifter_press, mapping.shifter_press);
 
 	return mapping;
 }
@@ -708,7 +707,6 @@ void usb_device_logitech_g27::interrupt_transfer(u32 buf_size, u8* buf, u32 endp
 		const bool shifter_5 = sdl_to_logitech_g27_button(m_joysticks, m_mapping.shifter_5);
 		const bool shifter_6 = sdl_to_logitech_g27_button(m_joysticks, m_mapping.shifter_6);
 		const bool shifter_r = sdl_to_logitech_g27_button(m_joysticks, m_mapping.shifter_r);
-		const bool shifter_press = sdl_to_logitech_g27_button(m_joysticks, m_mapping.shifter_press);
 		m_sdl_handles_mutex.unlock();
 
 		// populate buffer
@@ -747,16 +745,8 @@ void usb_device_logitech_g27::interrupt_transfer(u32 buf_size, u8* buf, u32 endp
 		set_bit(buf, 82, true);
 		// shifter connected
 		set_bit(buf, 83, true);
-		/*
-		 * shifter pressed/down bit
-		 * mechanical references:
-		 * - G29 shifter mechanical explanation https://youtu.be/d7qCn3o8K98?t=1124
-		 * - same mechanism on the G27 https://youtu.be/rdjejtIfkVA?t=760
-		 * - same mechanism on the G25 https://youtu.be/eCyt_4luwF0?t=130
-		 * on healthy G29/G27/G25 shifters, shifter is mechnically kept pressed in reverse, the bit should be set
-		 * the shifter_press mapping alone captures instead a shifter press without going into reverse, ie. neutral press, just in case there are games using it for input
-		 */
-		set_bit(buf, 86, shifter_press | shifter_r);
+		// shifter stick down
+		set_bit(buf, 86, shifter_1 || shifter_2 || shifter_3 || shifter_4 || shifter_5 || shifter_6 || shifter_r);
 
 		buf[3] = (steering << 2) | buf[3];
 		buf[4] = steering >> 6;
@@ -764,56 +754,8 @@ void usb_device_logitech_g27::interrupt_transfer(u32 buf_size, u8* buf, u32 endp
 		buf[6] = brake;
 		buf[7] = clutch;
 
-		// rough analog values recorded in https://github.com/RPCS3/rpcs3/pull/17199#issuecomment-2883934412
-		// buf[8] shifter x
-		// buf[9] shifter y
-		constexpr u8 shifter_coord_center = 0x80;
-		constexpr u8 shifter_coord_top = 0xb7;
-		constexpr u8 shifter_coord_bottom = 0x32;
-		constexpr u8 shifter_coord_left = 0x30;
-		constexpr u8 shifter_coord_right = 0xb3;
-		constexpr u8 shifter_coord_right_reverse = 0xaa;
-		if (shifter_1)
-		{
-			buf[8] = shifter_coord_left;
-			buf[9] = shifter_coord_top;
-		}
-		else if (shifter_2)
-		{
-			buf[8] = shifter_coord_left;
-			buf[9] = shifter_coord_bottom;
-		}
-		else if (shifter_3)
-		{
-			buf[8] = shifter_coord_center;
-			buf[9] = shifter_coord_top;
-		}
-		else if (shifter_4)
-		{
-			buf[8] = shifter_coord_center;
-			buf[9] = shifter_coord_bottom;
-		}
-		else if (shifter_5)
-		{
-			buf[8] = shifter_coord_right;
-			buf[9] = shifter_coord_top;
-		}
-		else if (shifter_6)
-		{
-			buf[8] = shifter_coord_right;
-			buf[9] = shifter_coord_bottom;
-		}
-		else if (shifter_r)
-		{
-			buf[8] = shifter_coord_right_reverse;
-			buf[9] = shifter_coord_bottom;
-		}
-		else
-		{
-			buf[8] = shifter_coord_center;
-			buf[9] = shifter_coord_center;
-		}
-
+		buf[8] = 0x80; // shifter x, don't own one to test gear/coord mapping
+		buf[9] = 0x80; // shifter y
 		buf[10] = buf[10] | (m_wheel_range > 360 ? 0x90 : 0x10);
 
 		// logitech_g27_log.error("%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9], buf[10]);
